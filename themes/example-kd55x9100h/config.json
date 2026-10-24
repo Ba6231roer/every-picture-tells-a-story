@@ -1,0 +1,23 @@
+{
+  "app_library": true,
+  "library_button": true,
+  "ambient_glow": false,
+  "poster_wall": true,
+  "poster_wall_cols": 9,
+  "poster_wall_tilt": 6,
+  "poster_wall_gap": 10,
+  "poster_wall_mode": "rippleRing",
+  "poster_wall_dur": 650,
+  "poster_wall_interval": 110,
+  "poster_wall_hold": 9,
+  "poster_wall_ambient": true,
+  "poster_wall_ambient_every": 8,
+  "poster_wall_dim_dock": true,
+  "poster_wall_vignette": 116,
+  "poster_wall_blur": 10,
+  "poster_wall_fx_range": 54,
+  "dock_scale_percent": 55,
+  "dock_apps": ["com.xiaodianshi.tv.yst"],
+  "fill_dock": false,
+  "dock_title": false
+}

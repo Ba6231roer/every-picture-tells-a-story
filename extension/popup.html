@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  body { width: 320px; margin: 0; padding: 14px; font: 13px "Segoe UI","Microsoft YaHei",sans-serif; background: #101216; color: #e8eaee; }
+  h3 { margin: 0 0 10px; font-size: 14px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  label { color: #9aa0a6; flex: none; }
+  input[type=file] { flex: 1; font-size: 12px; }
+  input[type=number] { width: 56px; }
+  input[type=checkbox] { accent-color: #4a8cff; }
+  button { padding: 6px 12px; border-radius: 7px; border: 1px solid #2c3038; background: #1b1e24; color: #e8eaee; cursor: pointer; }
+  button.primary { background: #4a8cff; border-color: transparent; color: #06121f; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  #queueName { color: #9aa0a6; font-size: 11px; margin: 4px 0 8px; word-break: break-all; }
+  #bar { height: 6px; background: #22262e; border-radius: 3px; overflow: hidden; margin: 10px 0 6px; }
+  #bar > div { height: 100%; width: 0; background: #4a8cff; transition: width .3s; }
+  #log { min-height: 46px; max-height: 110px; overflow: auto; font-size: 11.5px; line-height: 1.5; color: #9aa0a6; white-space: pre-wrap; }
+  .hint { font-size: 11px; color: #6b7078; margin-top: 10px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h3>豆瓣海报抓取</h3>
+  <div class="row"><label>来源</label>
+    <label><input type="radio" name="src" value="file" checked> 清单文件</label>
+    <label><input type="radio" name="src" value="douban"> 豆瓣我的影单</label>
+  </div>
+  <div class="row" id="statusRow" style="display:none"><label>标记</label>
+    <select id="status"><option value="done">看过</option><option value="wish">想看</option><option value="doing">在看</option></select>
+    <span style="color:#6b7078;font-size:11px">读取你在豆瓣标记的条目</span></div>
+  <div class="row" id="fileRow"><label>清单</label><input type="file" id="file" accept=".json"></div>
+  <div id="queueName">清单文件模式：先跑 tools/export_for_extension.py 生成待抓清单</div>
+  <div class="row"><label>间隔</label><input type="number" id="delay" value="6" min="3" max="60" step="1"> 秒/部
+    <label style="margin-left:10px"><input type="checkbox" id="onlyMissing" checked> 只抓缺失</label></div>
+  <div class="row">
+    <button class="primary" id="start" disabled>开始抓取</button>
+    <button id="pause" disabled>暂停</button>
+    <button id="resume" disabled>继续</button>
+    <button id="export" disabled>导出结果</button>
+  </div>
+  <div id="bar"><div></div></div>
+  <div id="log">步骤：① 导入清单 ② 确认本页浏览器已登录豆瓣 ③ 开始。</div>
+  <div class="hint">海报存到 Chrome 下载目录 poster-wall/&lt;电影名_年份&gt;.jpg；抓完点"导出结果"得到 results.json，
+  再运行 tools/merge_extension_results.py 合并进海报墙。<b>本插件只在本地运行，
+  不上传任何数据到任何服务器</b>；豆瓣登录仅用于读取你要抓取的页面。</div>
+<script src="popup.js"></script>
+</body>
+</html>

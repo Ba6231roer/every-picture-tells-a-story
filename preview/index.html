@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poster Flip Wall · 电影海报翻转墙（预览）</title>
+<style>
+:root {
+  --gap: 10px;
+  --tilt: 6deg;
+  --cw: 200px;
+  --chh: 300px;
+  --radius: 9px;
+  --accent: #5aa7ff;
+  --panel-bg: rgba(14, 16, 21, .74);
+  --fx-range: 58%;
+  --vig-a: 0.36;
+  --blur-px: 5px;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: #050507;
+  color: #e8eaee;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+/* ---------- 海报棋盘 ---------- */
+#stage { position: fixed; inset: 0; overflow: hidden; }
+#boardWrap {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%) rotate(var(--tilt));
+}
+#board {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--cw));
+  grid-auto-rows: var(--chh);
+  gap: var(--gap);
+}
+.cell { width: var(--cw); height: var(--chh); perspective: 1000px; }
+.card {
+  position: relative; width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transition: transform var(--dur, 650ms) cubic-bezier(.36, .08, .22, .99);
+  will-change: transform;
+}
+.card.notrans { transition: none !important; }
+.face {
+  position: absolute; inset: 0;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  border-radius: var(--radius); overflow: hidden;
+  background: #101014;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, .55);
+}
+.face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.face::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(163deg, rgba(255,255,255,.055), rgba(0,0,0,.10) 55%, rgba(0,0,0,.30));
+}
+.face.ph {
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 8%;
+}
+.face.ph .t {
+  font-size: calc(var(--cw) * .085); line-height: 1.25; text-align: center;
+  color: rgba(255,255,255,.92); text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  word-break: break-all;
+}
+/* 暗角与边缘模糊拆成两层：暗角用 Canvas 逐像素生成的贴图（这个浏览器环境里
+   "透明→纯黑"的 CSS 径向渐变有渲染怪癖，红色能画黑色不画，Canvas 是确定性的）；
+   边缘模糊用 backdrop-filter + 径向蒙版（已验证工作）。 */
+#vignette {
+  position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  background-size: 100% 100%;
+}
+#edgeBlur {
+  position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  -webkit-backdrop-filter: blur(var(--blur-px));
+  backdrop-filter: blur(var(--blur-px));
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 46%,
+      transparent var(--fx-range), #000 calc(var(--fx-range) + 16%));
+  mask-image: radial-gradient(120% 90% at 50% 46%,
+      transparent var(--fx-range), #000 calc(var(--fx-range) + 16%));
+}
+/* ---------- 顶部标题 ---------- */
+#brand {
+  position: fixed; left: 16px; top: 14px; z-index: 20;
+  font-size: 13px; letter-spacing: .06em; color: rgba(255,255,255,.55);
+  display: flex; align-items: center; gap: 8px;
+}
+#brand b { color: rgba(255,255,255,.85); font-weight: 600; }
+#brand .ver { color: rgba(255,255,255,.35); }
+/* ---------- 控制面板 ---------- */
+#gear {
+  position: fixed; right: 14px; top: 14px; z-index: 31;
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--panel-bg); backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.1); color: #e8eaee;
+  font-size: 17px; cursor: pointer;
+}
+#panel {
+  position: fixed; right: 14px; top: 60px; z-index: 30;
+  width: 296px; max-height: calc(100vh - 130px); overflow-y: auto;
+  background: var(--panel-bg); backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,.09); border-radius: 14px;
+  padding: 14px 16px 16px;
+  transition: transform .28s ease, opacity .28s ease;
+}
+#panel.hidden { transform: translateX(calc(100% + 26px)); opacity: 0; pointer-events: none; }
+#panel h3 { margin: 2px 0 10px; font-size: 13.5px; font-weight: 600; color: #fff; }
+#panel h3 small { color: rgba(255,255,255,.4); font-weight: 400; margin-left: 6px; }
+.row { display: flex; align-items: center; gap: 8px; margin: 9px 0; font-size: 12.5px; }
+.row > label { width: 72px; flex: none; color: rgba(255,255,255,.62); }
+.row > .val { width: 46px; flex: none; text-align: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+input[type=range] { flex: 1; accent-color: var(--accent); height: 18px; }
+select {
+  flex: 1; background: rgba(255,255,255,.07); color: #e8eaee;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 7px;
+  padding: 4px 6px; font-size: 12.5px; outline: none;
+}
+select option { background: #15171c; }
+.btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.btn {
+  flex: 1; min-width: 72px; padding: 7px 8px; font-size: 12.5px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.13);
+  color: #e8eaee; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: rgba(255,255,255,.14); }
+.btn.primary { background: var(--accent); border-color: transparent; color: #06121f; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.1); }
+.switch { display: flex; align-items: center; gap: 7px; cursor: pointer; color: rgba(255,255,255,.72); }
+.switch input { accent-color: var(--accent); width: 15px; height: 15px; }
+.sep { height: 1px; background: rgba(255,255,255,.09); margin: 12px 0; }
+#panel .hint { font-size: 11px; color: rgba(255,255,255,.35); line-height: 1.6; margin-top: 10px; }
+/* ---------- 底部状态栏 ---------- */
+#statusbar {
+  position: fixed; left: 14px; bottom: 14px; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel-bg); backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.09); border-radius: 12px;
+  padding: 9px 14px; font-size: 12.5px;
+}
+#moodDots { display: flex; gap: 7px; align-items: center; }
+.dot {
+  width: 15px; height: 15px; border-radius: 50%; cursor: pointer;
+  border: 2px solid rgba(255,255,255,.18); transition: transform .15s, border-color .15s;
+}
+.dot:hover { transform: scale(1.18); }
+.dot.active { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
+#stats { color: rgba(255,255,255,.6); }
+#stats b { color: #fff; font-weight: 600; }
+#fps { color: rgba(255,255,255,.35); font-variant-numeric: tabular-nums; }
+#progress {
+  position: fixed; left: 0; bottom: 0; z-index: 25; height: 3px; width: 0;
+  background: var(--accent); opacity: .85; transition: width .2s linear, opacity .4s;
+}
+/* ---------- 加载遮罩 ---------- */
+#loading {
+  position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+  background: #050507; transition: opacity .5s; font-size: 14px; color: rgba(255,255,255,.7);
+}
+#loading.gone { opacity: 0; pointer-events: none; }
+.spinner {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="boardWrap"><div id="board"></div></div>
+</div>
+  <div id="vignette"></div>
+  <div id="edgeBlur"></div>
+
+<div id="brand"><b>Poster Flip Wall</b><span>电影海报翻转墙</span><span class="ver">预览 v0.2</span></div>
+<button id="gear" title="显示/隐藏面板 (H)">⚙</button>
+
+<aside id="panel">
+  <h3>翻转控制 <small>评审用</small></h3>
+  <div class="row"><label>翻转模式</label>
+    <select id="modeSel"></select></div>
+  <div class="row"><label>目标色调</label>
+    <select id="moodSel"></select></div>
+  <div class="row"><label>翻转轴</label>
+    <select id="axisSel">
+      <option value="y">左右翻（Y）</option>
+      <option value="x">上下翻（X）</option>
+      <option value="diag">对角翻</option>
+      <option value="random">随机轴</option>
+    </select></div>
+  <div class="sep"></div>
+  <div class="row"><label>翻转时长</label><input id="dur" type="range" min="280" max="1400" step="20"><span class="val" id="durV"></span></div>
+  <div class="row"><label>翻转间隔</label><input id="interval" type="range" min="30" max="420" step="10"><span class="val" id="intervalV"></span></div>
+  <div class="row"><label>停留时间</label><input id="hold" type="range" min="2" max="25" step="1"><span class="val" id="holdV"></span></div>
+  <div class="sep"></div>
+  <label class="switch"><input id="tour" type="checkbox" checked> 自动巡演（色调 × 模式轮换）</label>
+  <label class="switch"><input id="ambient" type="checkbox" checked> 待机零星翻转（同色调换片）</label>
+  <div class="row"><label>零星频率</label><input id="ambientEvery" type="range" min="2" max="15" step="1"><span class="val" id="ambientEveryV"></span></div>
+  <div class="sep"></div>
+  <h3>棋盘</h3>
+  <div class="row"><label>列数</label><input id="cols" type="range" min="5" max="16" step="1"><span class="val" id="colsV"></span></div>
+  <div class="row"><label>倾斜角</label><input id="tilt" type="range" min="0" max="12" step="0.5"><span class="val" id="tiltV"></span></div>
+  <div class="row"><label>间隙</label><input id="gap" type="range" min="0" max="26" step="1"><span class="val" id="gapV"></span></div>
+  <h3>画面效果</h3>
+  <div class="row"><label>暗角强度</label><input id="vig" type="range" min="0" max="150" step="1"><span class="val" id="vigV"></span></div>
+  <div class="row"><label>边缘模糊</label><input id="blur" type="range" min="0" max="24" step="1"><span class="val" id="blurV"></span></div>
+  <div class="row"><label>效果范围</label><input id="fxRange" type="range" min="20" max="90" step="1"><span class="val" id="fxRangeV"></span></div>
+  <div class="btns">
+    <button class="btn primary" id="flipNow">▶ 立即翻转</button>
+    <button class="btn" id="pauseBtn">⏸ 暂停</button>
+  </div>
+  <div class="hint">快捷键：空格 暂停/继续 · N 下一轮 · H 隐藏面板 · M 切换模式<br>
+  海报来自豆瓣（按你的观影清单匹配），色彩池按海报主色自动归桶。</div>
+</aside>
+
+<footer id="statusbar">
+  <div id="moodDots"></div>
+  <div id="stats">…</div>
+  <div id="fps"></div>
+</footer>
+<div id="progress"></div>
+
+<div id="loading"><div class="spinner"></div><div id="loadingText">加载海报中…</div></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const rand = (a, b) => a + Math.random() * (b - a);
+const rint = (a, b) => Math.floor(rand(a, b + 1));
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const pick = a => a[(Math.random() * a.length) | 0];
+
+const MOOD_COLORS = {
+  "黑白": "#9aa0a6", "红": "#e5484d", "橙": "#f2762e", "金": "#f2c14e",
+  "绿": "#46a758", "青": "#12a594", "蓝": "#3f8cff", "紫": "#8e6bd8", "粉": "#ef7ab8",
+};
+const MODES = [
+  ["ripple",    "扩散缓动（双源渐远）"],
+  ["rippleRing", "波纹递进（一圈圈展开）"],
+  ["column",    "列扫（左→右）"],
+  ["row",       "行扫（上→下）"],
+  ["diagonal",  "对角线推进"],
+  ["checker",   "棋盘两相交替"],
+  ["spiral",    "螺旋（外→内）"],
+  ["spiralIn",  "螺旋（内→外）"],
+  ["random",    "随机逐格"],
+  ["stagger",   "风暴齐翻（随机延迟）"],
+  ["converge",  "向心收拢"],
+  ["splitflap", "翻牌时刻（机场牌）"],
+];
+
+const state = {
+  manifest: null,
+  imgs: [],               // 预加载的 Image
+  cols: 10, rows: 0,
+  cells: [],              // {el, card, front, back, fImg, bImg, cur, busy}
+  mood: null,
+  mode: "ripple", modeFixed: false,
+  moodFixed: false, moodChoice: "auto",
+  axis: "y",
+  dur: 650, interval: 90, hold: 9,
+  tour: true, ambient: true, ambientEvery: 7,
+  tilt: 6, gap: 10,
+  vig: 116, blur: 10, fxRange: 54,
+  paused: false,
+  trans: null,            // {timers:[], entries:[], start, total, done, targets}
+  holdTimer: 0, ambientLast: 0,
+  moodCursor: 0, modeCursor: 0,
+};
+
+/* ---------------- 棋盘构建 ---------------- */
+const board = $("#board"), wrap = $("#boardWrap");
+
+function buildGrid(keepMood) {
+  const W = innerWidth, H = innerHeight;
+  const th = state.tilt * Math.PI / 180;
+  const covW = (W * Math.cos(th) + H * Math.sin(th)) * 1.16;
+  const covH = (W * sin_(th) + H * Math.cos(th)) * 1.16;
+  const gap = state.gap;
+  const cols = state.cols;
+  const cw = (covW - gap * (cols - 1)) / cols;
+  const ch = cw * 1.5;
+  const rows = Math.max(1, Math.ceil((covH - gap) / (ch + gap)));
+  state.rows = rows;
+  const rs = document.documentElement.style;
+  rs.setProperty("--cols", cols);
+  rs.setProperty("--cw", cw + "px");
+  rs.setProperty("--chh", ch + "px");
+  rs.setProperty("--gap", gap + "px");
+  rs.setProperty("--tilt", state.tilt + "deg");
+  board.innerHTML = "";
+  state.cells = [];
+  const frag = document.createDocumentFragment();
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    const card = document.createElement("div");
+    card.className = "card";
+    const front = faceEl(false), back = faceEl(true);
+    card.append(front, back);
+    cell.append(card);
+    frag.append(cell);
+    state.cells.push({
+      el: cell, card, front, back,
+      fImg: front.querySelector("img"), bImg: back.querySelector("img"),
+      cur: -1, busy: false, c, r,
+    });
+  }
+  board.append(frag);
+  if (keepMood && state.mood) fillInstant(state.mood);
+}
+function sin_(t) { return Math.sin(t); }
+function faceEl(isBack) {
+  const f = document.createElement("div");
+  f.className = "face" + (isBack ? " back" : "");
+  const img = document.createElement("img");
+  img.alt = ""; img.draggable = false;
+  f.append(img);
+  return f;
+}
+
+/* ---------------- 图像 ---------------- */
+function srcOf(i) { const p = state.manifest.posters[i]; return p.ph ? null : p.file; }
+function setFace(face, i) {
+  const p = state.manifest.posters[i];
+  face.classList.remove("ph");
+  const img = face.querySelector("img");
+  const t = face.querySelector(".t");
+  if (t) t.remove();
+  if (p.ph) { // 无图兜底：主色渐变 + 片名
+    face.classList.add("ph");
+    face.style.background = `linear-gradient(158deg, ${p.dom}, #0c0c10 130%)`;
+    const label = document.createElement("div");
+    label.className = "t"; label.textContent = p.title;
+    face.append(label);
+    img.removeAttribute("src");
+  } else {
+    face.style.background = "";
+    const cached = state.imgs[i];
+    const src = cached && cached.complete && cached.naturalWidth ? cached.src : "../" + p.file;
+    if (img.getAttribute("src") !== src) img.src = src;
+    img.onerror = () => {
+      img.style.display = "none";
+      face.style.background = `linear-gradient(158deg, ${p.dom}, #0c0c10 130%)`;
+    };
+    img.style.display = "";
+  }
+  face.title = `${p.title}${p.year ? " (" + p.year + ")" : ""}${p.rating ? " · " + p.rating : ""}`;
+}
+function setFaceImage(faceEl2, idx) { setFace(faceEl2, idx); }
+function fillInstant(mood) {
+  const targets = assignTargets(mood);
+  state.cells.forEach((cell, i) => {
+    cell.cur = targets[i];
+    setFace(cell.front, cell.cur);
+  });
+  state.mood = mood;
+  refreshAccent(); refreshStatus(); refreshDots();
+}
+
+/* ---------------- 目标分配 ---------------- */
+function poolOf(mood) {
+  const m = state.manifest.moods;
+  if (m[mood] && m[mood].length) return m[mood];
+  const biggest = Object.keys(m).sort((a, b) => m[b].length - m[a].length)[0];
+  return m[biggest];
+}
+function assignTargets(mood) {
+  const pool = poolOf(mood);
+  const n = state.cells.length;
+  const bag = [];
+  while (bag.length < n + pool.length) bag.push(...shuffle(pool));
+  const off = rint(0, pool.length - 1);
+  return state.cells.map((cell, i) => {
+    let t = bag[(i + off) % bag.length];
+    if (t === cell.cur) t = bag[(i + off + 1) % bag.length];
+    return t;
+  });
+}
+
+/* ---------------- 翻转 ---------------- */
+function axisVec() {
+  if (state.axis === "random") return pick([[0, 1], [1, 0], [1, 1]]);
+  if (state.axis === "x") return [1, 0];
+  if (state.axis === "diag") return [1, 1];
+  return [0, 1];
+}
+function flipCell(cell, target, dur) {
+  if (cell.busy || target == null || target === cell.cur) return false;
+  cell.busy = true;
+  const [ax, ay] = axisVec();
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  cell.back.style.transform = `rotate3d(${ax},${ay},0,180deg)`;
+  setFace(cell.back, target);
+  cell.card.style.setProperty("--dur", dur + "ms");
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    cell.card.style.transform = `rotate3d(${ax},${ay},0,${180 * dir}deg)`;
+  }));
+  setTimeout(() => {
+    cell.cur = target;
+    setFace(cell.front, target);
+    cell.card.classList.add("notrans");
+    cell.card.style.transform = "";
+    void cell.card.offsetWidth;
+    cell.card.classList.remove("notrans");
+    cell.busy = false;
+  }, dur + 40);
+  return true;
+}
+
+/* ---------------- 编排（各模式的调度表）---------------- */
+function schedule(mode, dur) {
+  const cells = state.cells, cols = state.cols, rows = state.rows;
+  const n = cells.length, itv = state.interval;
+  const jit = k => rand(-k, k);
+  const entries = [];
+  const add = (i, t, d) => entries.push({ i, t: Math.max(0, t), d: d || dur });
+  if (mode === "random") {
+    shuffle(cells.map((_, i) => i)).forEach((i, k) => add(i, k * itv + jit(itv * .3)));
+  } else if (mode === "column") {
+    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++)
+      add(r * cols + c, c * rows * itv * .55 + r * itv * .55 + jit(itv * .4));
+  } else if (mode === "row") {
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
+      add(r * cols + c, r * cols * itv * .55 + c * itv * .55 + jit(itv * .4));
+  } else if (mode === "diagonal") {
+    cells.forEach((cell, i) => add(i, (cell.c + cell.r) * itv * 1.15 + jit(itv * .5)));
+  } else if (mode === "checker") {
+    const spread = Math.max(900, n * itv * .32);
+    const even = [], odd = [];
+    cells.forEach((cell, i) => ((cell.c + cell.r) % 2 ? odd : even).push(i));
+    shuffle(even).forEach(i => add(i, rand(0, spread)));
+    shuffle(odd).forEach(i => add(i, spread + rand(0, spread)));
+  } else if (mode === "spiral" || mode === "spiralIn") {
+    const order = spiralOrder(cols, rows);
+    const rank = new Map(order.map((idx, k) => [idx, k]));
+    cells.forEach((_, i) => {
+      const k = rank.get(i) ?? 0;
+      const t = (mode === "spiral" ? k : order.length - 1 - k) * itv * .6;
+      add(i, t + jit(itv * .3));
+    });
+  } else if (mode === "ripple") {
+    const seeds = [rint(0, n - 1)];
+    seeds.push((seeds[0] + ((n / 2) | 0)) % n);
+    cells.forEach((cell, i) => {
+      let d = Infinity;
+      seeds.forEach(s => {
+        const sc = cells[s];
+        d = Math.min(d, Math.hypot(cell.c - sc.c, cell.r - sc.r));
+      });
+      add(i, d * itv * 1.35 + jit(itv * .6));
+    });
+  } else if (mode === "rippleRing") {
+    // 波纹递进：每次随机一个中心格，从它一圈圈向外递进（Chebyshev 距离成环）
+    const seed = cells[rint(0, n - 1)];
+    const ringItv = Math.min(340, Math.max(100, itv * 1.8));
+    cells.forEach((cell, i) => {
+      const ring = Math.max(Math.abs(cell.c - seed.c), Math.abs(cell.r - seed.r));
+      add(i, ring * ringItv + jit(ringItv * .35));
+    });
+  } else if (mode === "converge") {
+    const cc = (cols - 1) / 2, rr = (rows - 1) / 2;
+    let maxD = 0;
+    const ds = cells.map(cell => Math.hypot(cell.c - cc, cell.r - rr));
+    ds.forEach(d => maxD = Math.max(maxD, d));
+    cells.forEach((cell, i) => add(i, (maxD - ds[i]) * itv * 1.35 + jit(itv * .6)));
+  } else if (mode === "stagger") {
+    const spread = Math.min(4200, Math.max(1100, n * itv * .28));
+    cells.forEach((_, i) => add(i, Math.pow(Math.random(), 1.35) * spread));
+  } else if (mode === "splitflap") {
+    const d2 = Math.min(dur, 400);
+    cells.forEach((_, i) => add(i, rand(0, 700), d2));
+  }
+  return entries;
+}
+function spiralOrder(cols, rows) {
+  const out = [];
+  let x0 = 0, y0 = 0, x1 = cols - 1, y1 = rows - 1;
+  while (x0 <= x1 && y0 <= y1) {
+    for (let x = x0; x <= x1; x++) out.push(y0 * cols + x);
+    for (let y = y0 + 1; y <= y1; y++) out.push(y * cols + x1);
+    if (y1 > y0) for (let x = x1 - 1; x >= x0; x--) out.push(y1 * cols + x);
+    if (x1 > x0) for (let y = y1 - 1; y > y0; y--) out.push(y * cols + x0);
+    x0++; y0++; x1--; y1--;
+  }
+  return out;
+}
+
+/* ---------------- 整轮翻转 ---------------- */
+function transitionTo(mood, opts = {}) {
+  if (!state.manifest || state.paused && !opts.force) return;
+  stopTrans();
+  const dur = state.dur;
+  const targets = assignTargets(mood);
+  const entries = schedule(state.mode, dur);
+  const total = Math.max(...entries.map(e => e.t)) + dur + 60;
+  const start = performance.now();
+  const timers = entries.map(e => setTimeout(() => {
+    flipCell(state.cells[e.i], targets[e.i], e.d);
+  }, e.t));
+  const holdT = setTimeout(() => {
+    state.trans = null;
+    updateProgress(1, true);
+    if (state.tour && !state.paused) tourNext();
+  }, total + state.hold * 1000);
+  state.trans = { timers, entries, start, total, targets, holdTimer: holdT };
+  state.mood = mood;
+  refreshAccent(); refreshStatus(); refreshDots();
+}
+function stopTrans() {
+  if (state.trans) {
+    state.trans.timers.forEach(clearTimeout);
+    clearTimeout(state.trans.holdTimer);
+  }
+  clearTimeout(state.holdTimer);
+  state.trans = null;
+}
+function tourNext() {
+  const moodKeys = Object.keys(state.manifest.moods).filter(k => state.manifest.moods[k].length);
+  // 模式轮换（若未固定）
+  if (!state.modeFixed) {
+    state.modeCursor = (state.modeCursor + 1) % MODES.length;
+    state.mode = MODES[state.modeCursor][0];
+  }
+  // 色调轮换：不与当前重复，尽量选大池
+  const others = moodKeys.filter(k => k !== state.mood);
+  const weights = others.map(k => state.manifest.moods[k].length);
+  let x = Math.random() * weights.reduce((a, b) => a + b, 0);
+  let next = others[others.length - 1];
+  for (let i = 0; i < others.length; i++) { x -= weights[i]; if (x <= 0) { next = others[i]; break; } }
+  syncControls();
+  transitionTo(next);
+}
+
+/* ---------------- 待机零星翻转 ---------------- */
+function ambientTick(now) {
+  if (!state.ambient || state.paused || state.trans) return;
+  if (now - state.ambientLast < state.ambientEvery * 1000) return;
+  state.ambientLast = now;
+  const free = state.cells.filter(c => !c.busy);
+  if (!free.length) return;
+  const k = Math.min(free.length, rint(1, 2));
+  shuffle(free).slice(0, k).forEach(cell => {
+    const pool = poolOf(state.mood);
+    const t = pick(pool.filter(i => i !== cell.cur)) ?? pick(pool);
+    flipCell(cell, t, Math.max(420, state.dur * .8));
+  });
+}
+
+/* ---------------- 进度 / 状态 ---------------- */
+const progress = $("#progress");
+function updateProgress(v, hide) {
+  progress.style.width = (v * 100).toFixed(1) + "%";
+  progress.style.opacity = hide ? 0 : .85;
+}
+function refreshStatus() {
+  const m = state.manifest ? state.manifest.count : 0;
+  const modeLabel = (MODES.find(x => x[0] === state.mode) || ["", state.mode])[1];
+  $("#stats").innerHTML =
+    `当前 <b>${state.mood || "-"}色调</b> · ${modeLabel} · ${state.cells.length} 格 / ${m} 部`;
+}
+function refreshAccent() {
+  const pool = poolOf(state.mood);
+  const sample = [];
+  for (let i = 0; i < Math.min(14, pool.length); i++) sample.push(state.manifest.posters[pool[i]]);
+  const best = sample.sort((a, b) => colorLuma(b.dom) - colorLuma(a.dom))[Math.min(2, sample.length - 1)];
+  document.documentElement.style.setProperty("--accent", best ? best.dom : "#5aa7ff");
+}
+function colorLuma(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+function refreshDots() {
+  const box = $("#moodDots");
+  box.innerHTML = "";
+  Object.keys(state.manifest.moods).forEach(k => {
+    if (!state.manifest.moods[k].length) return;
+    const d = document.createElement("div");
+    d.className = "dot" + (k === state.mood ? " active" : "");
+    d.style.background = MOOD_COLORS[k] || "#888";
+    d.title = k + "（" + state.manifest.moods[k].length + " 部）";
+    d.onclick = () => { if (!state.paused) { syncMoodSel(k); transitionTo(k, { force: true }); } };
+    box.append(d);
+  });
+}
+function syncMoodSel(k) { $("#moodSel").value = k; }
+
+/* ---------------- FPS ---------------- */
+let frames = 0, fpsT = performance.now();
+function loop(now) {
+  frames++;
+  if (now - fpsT >= 500) {
+    $("#fps").textContent = Math.round(frames * 1000 / (now - fpsT)) + " fps";
+    frames = 0; fpsT = now;
+  }
+  ambientTick(now);
+  if (state.trans) updateProgress(Math.min(1, (now - state.trans.start) / state.trans.total));
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- 控件 ---------------- */
+function initControls() {
+  const modeSel = $("#modeSel");
+  modeSel.innerHTML = `<option value="__tour">跟随巡演</option>` +
+    MODES.map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  modeSel.onchange = () => {
+    if (modeSel.value === "__tour") { state.modeFixed = false; }
+    else { state.modeFixed = true; state.mode = modeSel.value; state.modeCursor = MODES.findIndex(x => x[0] === state.mode); }
+    refreshStatus();
+  };
+  const moodSel = $("#moodSel");
+  moodSel.innerHTML = `<option value="auto">巡演自动选</option>`;
+  moodSel.onchange = () => {
+    state.moodChoice = moodSel.value;
+    state.moodFixed = moodSel.value !== "auto";
+  };
+  $("#axisSel").onchange = e => state.axis = e.target.value;
+  $("#axisSel").value = state.axis;
+  $("#tour").checked = state.tour;
+  $("#ambient").checked = state.ambient;
+  const bind = (id, key, parse = parseFloat, rebuild = false, fmt = v => v) => {
+    const el = $("#" + id), lab = $("#" + id + "V");
+    el.value = state[key];
+    lab.textContent = fmt(state[key]);
+    let deb;
+    el.oninput = () => {
+      state[key] = parse(el.value);
+      lab.textContent = fmt(state[key]);
+      saveCfg();
+      if (rebuild) { clearTimeout(deb); deb = setTimeout(() => buildGrid(true), 220); }
+    };
+  };
+  bind("dur", "dur");
+  bind("interval", "interval");
+  bind("hold", "hold", parseFloat, false, v => v + "s");
+  bind("ambientEvery", "ambientEvery", parseFloat, false, v => v + "s");
+  bind("cols", "cols", parseInt, true);
+  bind("tilt", "tilt", parseFloat, true, v => v + "°");
+  bind("gap", "gap", parseInt, true);
+  bind("vig", "vig", parseInt, false, v => v + "%");
+  bind("blur", "blur", parseInt, false, v => v + "px");
+  bind("fxRange", "fxRange", parseInt, false, v => v + "%");
+  ["vig", "blur", "fxRange"].forEach(id => $("#" + id).addEventListener("input", applyFx));
+  applyFx();
+  $("#tour").onchange = e => state.tour = e.target.checked;
+  $("#ambient").onchange = e => state.ambient = e.target.checked;
+  $("#flipNow").onclick = () => {
+    const m = state.moodFixed && state.moodChoice !== "auto" ? state.moodChoice : nextMoodManual();
+    syncMoodSel(state.moodFixed ? state.moodChoice : "auto");
+    transitionTo(m, { force: true });
+  };
+  $("#pauseBtn").onclick = togglePause;
+  $("#gear").onclick = () => $("#panel").classList.toggle("hidden");
+  addEventListener("keydown", e => {
+    if (e.code === "Space") { e.preventDefault(); togglePause(); }
+    else if (e.key === "n" || e.key === "N") $("#flipNow").click();
+    else if (e.key === "h" || e.key === "H") $("#panel").classList.toggle("hidden");
+    else if (e.key === "m" || e.key === "M") { state.modeFixed = false; tourNext(); }
+  });
+  addEventListener("resize", () => { clearTimeout(window.__rz); window.__rz = setTimeout(() => buildGrid(true), 200); });
+}
+function nextMoodManual() {
+  const keys = Object.keys(state.manifest.moods).filter(k => state.manifest.moods[k].length);
+  const others = keys.filter(k => k !== state.mood);
+  return pick(others.length ? others : keys);
+}
+function togglePause() {
+  state.paused = !state.paused;
+  $("#pauseBtn").textContent = state.paused ? "▶ 继续" : "⏸ 暂停";
+  if (state.paused) {
+    if (state.trans) {
+      const elapsed = performance.now() - state.trans.start;
+      state.trans.timers.forEach(clearTimeout);
+      clearTimeout(state.trans.holdTimer);
+      state.trans.elapsed = elapsed;
+    }
+    clearTimeout(state.holdTimer);
+  } else {
+    const tr = state.trans;
+    if (tr && tr.elapsed != null) {
+      // 补播：把暂停时还没翻的格子按剩余延迟重新排上
+      const now = performance.now();
+      tr.start = now - tr.elapsed;
+      tr.timers = tr.entries
+        .filter(e => e.t > tr.elapsed)
+        .map(e => setTimeout(() => flipCell(state.cells[e.i], tr.targets[e.i], e.d), e.t - tr.elapsed));
+      clearTimeout(tr.holdTimer);
+      tr.holdTimer = setTimeout(() => {
+        state.trans = null;
+        updateProgress(1, true);
+        if (state.tour && !state.paused) tourNext();
+      }, tr.total - tr.elapsed + state.hold * 1000);
+    } else if (state.tour) {
+      state.holdTimer = setTimeout(() => tourNext(), 1500);
+    }
+  }
+}
+function syncControls() {
+  $("#modeSel").value = state.modeFixed ? state.mode : "__tour";
+  $("#moodSel").value = state.moodFixed ? state.moodChoice : "auto";
+}
+function saveCfg() {
+  const { dur, interval, hold, ambientEvery, cols, tilt, gap, axis, tour, ambient, vig, blur, fxRange } = state;
+  localStorage.setItem("pfw-cfg", JSON.stringify({ dur, interval, hold, ambientEvery, cols, tilt, gap, axis, tour, ambient, vig, blur, fxRange }));
+}
+
+/* 画面效果：暗角（Canvas 逐像素贴图）+ 边缘模糊（backdrop-filter + 径向蒙版）。
+   暗角映射：100 → 0.85 深度；135 起外圈到 1（效果区内纯黑），滑杆上限 150。全 0 两层都隐藏。 */
+let vigTexKey = "";
+function applyFx() {
+  const rs = document.documentElement.style;
+  rs.setProperty("--fx-range", state.fxRange + "%");
+  rs.setProperty("--blur-px", state.blur + "px");
+  const vig = $("#vignette"), eb = $("#edgeBlur");
+  vig.style.visibility = state.vig > 0 ? "visible" : "hidden";
+  eb.style.display = state.blur > 0 ? "block" : "none";
+  if (state.vig > 0) {
+    const key = state.vig + "|" + state.fxRange;
+    if (key !== vigTexKey) {
+      vigTexKey = key;
+      vig.style.backgroundImage = `url(${makeVignetteTexture(state.vig, state.fxRange)})`;
+    }
+  }
+}
+
+function makeVignetteTexture(vig, range) {
+  const w = 320, h = 180;
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d");
+  const img = ctx.createImageData(w, h);
+  const cx = w * 0.5, cy = h * 0.46, rx = w * 1.2, ry = h * 0.9;
+  const depth = vig / 100 * 0.85;   // 100 → 0.85；135 → 1.1475（外圈钳到 1 = 纯黑）
+  const rIn = range / 100 - 0.16, rOut = range / 100 + 0.16;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = Math.sqrt(((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2);
+      const t = Math.max(0, Math.min(1, (d - rIn) / (rOut - rIn)));
+      const a = Math.min(1, t * depth);
+      const i = (y * w + x) * 4;
+      img.data[i] = 0; img.data[i + 1] = 0; img.data[i + 2] = 0;
+      img.data[i + 3] = Math.round(a * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv.toDataURL("image/png");
+}
+function loadCfg() {
+  try {
+    const c = JSON.parse(localStorage.getItem("pfw-cfg") || "null");
+    if (c) Object.assign(state, c);
+  } catch (_) { /* ignore */ }
+}
+
+/* ---------------- 兜底数据（manifest 缺失时也能看动画）---------------- */
+function demoManifest() {
+  const hues = [["蓝", 215], ["红", 358], ["金", 52], ["绿", 130], ["紫", 272], ["橙", 25], ["黑白", -1]];
+  const posters = [], moods = {};
+  let i = 0;
+  for (const [name, h] of hues) {
+    moods[name] = [];
+    for (let k = 0; k < 14; k++) {
+      const hh = h < 0 ? 0 : h + rand(-12, 12);
+      const dom = h < 0 ? "#2a2c30" : `hsl(${hh} ${rand(55, 80)}% ${rand(30, 55)}%)`;
+      posters.push({ file: "", ph: true, title: name + "示例 " + (k + 1), year: null, dom, avg: dom, mood: name });
+      moods[name].push(i++);
+    }
+  }
+  return { count: posters.length, moods, posters, demo: true };
+}
+
+/* ---------------- 启动 ---------------- */
+async function boot() {
+  loadCfg();
+  initControls();
+  let man = null;
+  try {
+    const r = await fetch("../data/manifest.json", { cache: "no-store" });
+    if (r.ok) man = await r.json();
+  } catch (_) { /* ignore */ }
+  if (!man || !man.count) man = demoManifest();
+  state.manifest = man;
+  state.imgs = man.posters.map(p => p.ph ? null : Object.assign(new Image(), { src: "../" + p.file }));
+  // 初始色调：取最大的池
+  const keys = Object.keys(man.moods);
+  const first = keys.sort((a, b) => man.moods[b].length - man.moods[a].length)[0];
+  buildGrid(false);
+  fillInstant(first);
+  // 预热首批图（初始池 + 每池前几张），最多等 2.5s
+  const warm = new Set([...man.moods[first], ...keys.flatMap(k => man.moods[k].slice(0, 10))]);
+  await Promise.race([
+    Promise.all([...warm].map(i => state.imgs[i] && new Promise(res => {
+      const im = state.imgs[i];
+      im.complete ? res() : (im.onload = im.onerror = res);
+    }))),
+    new Promise(res => setTimeout(res, 2500)),
+  ]);
+  $("#loading").classList.add("gone");
+  // 等待面板就绪后把色调下拉填上
+  const moodSel = $("#moodSel");
+  moodSel.innerHTML = `<option value="auto">巡演自动选</option>` +
+    Object.keys(man.moods).map(k =>
+      `<option value="${k}">${k}（${man.moods[k].length}）</option>`).join("");
+  requestAnimationFrame(loop);
+  // 首轮巡演
+  if (state.tour) state.holdTimer = setTimeout(() => tourNext(), state.hold * 1000);
+  // 补抓进行中：每 5 分钟重拉 manifest，有新海报就热更新
+  setInterval(async () => {
+    try {
+      const r = await fetch("../data/manifest.json", { cache: "no-store" });
+      if (!r.ok) return;
+      const man = await r.json();
+      if (!man || !man.count || man.count === state.manifest.count) return;
+      state.manifest = man;
+      state.imgs = man.posters.map(p => p.ph ? null : Object.assign(new Image(), { src: "../" + p.file }));
+      const ms = $("#moodSel");
+      ms.innerHTML = `<option value="auto">巡演自动选</option>` +
+        Object.keys(man.moods).map(k => `<option value="${k}">${k}（${man.moods[k].length}）</option>`).join("");
+      if (!man.moods[state.mood]) fillInstant(Object.keys(man.moods)[0]);
+      else fillInstant(state.mood);
+      refreshDots();
+    } catch (_) { /* ignore */ }
+  }, 5 * 60 * 1000);
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "豆瓣海报抓取 · Poster Flip Wall",
+  "version": "0.4",
+  "description": "按观影清单在豆瓣逐个检索电影海报并导出到下载目录，供 Poster Flip Wall 的合并脚本使用。需要先在 Chrome 里登录豆瓣。",
+  "permissions": ["downloads", "storage", "scripting", "tabs"],
+  "host_permissions": [
+    "https://movie.douban.com/*",
+    "https://*.douban.com/*",
+    "https://*.doubanio.com/*"
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "豆瓣海报抓取" },
+  "background": { "service_worker": "background.js" }
+}

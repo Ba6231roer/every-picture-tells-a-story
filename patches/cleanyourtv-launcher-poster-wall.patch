@@ -1,0 +1,1609 @@
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/AppAdapter.java b/launcher/app/src/main/java/com/gathin/tvhome/AppAdapter.java
+index d55717c..fbc8c27 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/AppAdapter.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/AppAdapter.java
+@@ -174,6 +174,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+     private final int dockSize;
+     /** config dock_row: false makes the dock apps the first tiles of one plain grid (names shown, no empty slots). */
+     private final boolean dockRow;
++    /** dock_scale_percent: the dock row's tiles shrink to this fraction (the poster wall shows through). */
++    private final int dockScalePercent;
+     /** config always_show_names: the alpha of an unfocused tile's name (0 hides it). */
+     private final float restNameAlpha;
+     /** cinematic_home: only then does a launch record the last-opened app the shelf uses. */
+@@ -213,6 +215,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+         this.showLibrary = cfg.appLibrary;
+         this.reducedMotion = cfg.reducedMotion;
+         this.rowsBelowDock = cfg.rowsBelowDock;
++        this.dockScalePercent = cfg.dockScalePercent;
+         this.dockTitle = cfg.dockTitle;
+         this.dockRow = cfg.dockRow;
+         this.restNameAlpha = cfg.alwaysShowNames ? 0.75f : 0f;
+@@ -370,7 +373,13 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+         float density = parent.getResources().getDisplayMetrics().density;
+         int width = parent.getWidth() > 0 ? parent.getWidth() : parent.getMeasuredWidth();
+         int inner = width - parent.getPaddingLeft() - parent.getPaddingRight();
++        boolean dockTile = viewType == 2;
+         int w = tileWidthPx(inner, parent.getHeight(), dockSize, rowsBelowDock, dockTitle, dockRow, density), h = tileHeightPx(w);
++        if (dockTile && dockScalePercent < 100) {
++            // dock_scale_percent: shrink the dock row so a backdrop (the poster wall) shows through.
++            w = Math.round(w * dockScalePercent / 100f);
++            h = Math.round(h * dockScalePercent / 100f);
++        }
+         View card = v.findViewById(R.id.card);
+         ViewGroup.LayoutParams cardLp = card.getLayoutParams();
+         cardLp.width = w;
+@@ -486,7 +495,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+ 
+     boolean isLibraryAt(int position) { return showLibrary && position == items.size(); }
+ 
+-    @Override public int getItemViewType(int position) { return isLibraryAt(position) ? 1 : 0; }
++    @Override public int getItemViewType(int position) {
++        return isLibraryAt(position) ? 1 : (dockRow && position < dockSize ? 2 : 0);
++    }
+ 
+     boolean containsPackage(String pkg) {
+         for (Entry entry : items) if (entry.pkg.equals(pkg)) return true;
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index b55b5a1..705f955 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -39,6 +39,17 @@ final class Config {
+     static final String SETTINGS_NAME = "launcher_settings";
+     static final String ROWS_BELOW_DOCK_KEY = "rows_below_dock";
+     static final String WALLPAPER_CHOICE_KEY = "wallpaper_choice";
++    // Poster wall on-TV choices (LauncherSettingsActivity), cleared by every theme push.
++    static final String PW_MODE_KEY = "poster_wall_mode";
++    static final String PW_COLS_KEY = "poster_wall_cols";
++    static final String PW_TILT_KEY = "poster_wall_tilt";
++    static final String PW_GAP_KEY = "poster_wall_gap";
++    static final String PW_DUR_KEY = "poster_wall_dur";
++    static final String PW_INTERVAL_KEY = "poster_wall_interval";
++    static final String PW_HOLD_KEY = "poster_wall_hold";
++    static final String PW_VIGNETTE_KEY = "poster_wall_vignette";
++    static final String PW_BLUR_KEY = "poster_wall_blur";
++    static final String PW_FX_RANGE_KEY = "poster_wall_fx_range";
+     private static final String THEME_REVISION_NAME = "theme_revision";
+     private static final String THEME_SIGNATURE_KEY = "theme_signature";
+ 
+@@ -128,6 +139,26 @@ final class Config {
+     final boolean ambientGlow;
+     /** Minutes Home may sit untouched before the clock screensaver (config.xml, home_idle_clock_minutes); 0 is off. */
+     final int homeIdleClockMinutes;
++    /** Poster flip wall as the home backdrop (config.json, poster_wall); needs files/posterwall/ data. */
++    final boolean posterWall;
++    final int posterWallCols;
++    final int posterWallTilt;
++    final String posterWallMode;
++    final int posterWallDur;
++    final int posterWallInterval;
++    final int posterWallHold;
++    final boolean posterWallAmbient;
++    final int posterWallAmbientEvery;
++    /** Dock tiles shrink to this percent (50-100, config.json dock_scale_percent) so the wall shows through. */
++    final int dockScalePercent;
++    /** With the wall on, the dock band goes translucent so the wall shows through. */
++    final boolean posterWallDimDock;
++    /** Gap between wall tiles in dp (config.json poster_wall_gap, 0-30); also settable on TV. */
++    final int posterWallGap;
++    /** 画面效果：暗角强度（100=0.85 深度，116+ 外圈近全黑）、边缘模糊 px、范围 %。 */
++    final int posterWallVignette;
++    final int posterWallBlur;
++    final int posterWallFxRange;
+ 
+     private Config(List<String> dockApps, boolean fillDock, List<String> hiddenApps, String liveTvPackage,
+                    String liveTvAction, Map<String, String> launchActions, Map<String, String> appLabels,
+@@ -138,7 +169,11 @@ final class Config {
+                    int[] settingsKeycodes, boolean settingsKeyPanel, boolean wallpaperEnabled, File wallpaper, List<File> wallpapers,
+                    int wallpaperRotationMinutes, int wallpaperDim, String wallpaperOrder, boolean overlayApplied,
+                    Festival festival, int[] inputKeycodes, List<String> appKeys,
+-                   List<RaceWeekend.Race> raceCalendar, boolean cinematicHome, boolean ambientGlow, int homeIdleClockMinutes) {
++                   List<RaceWeekend.Race> raceCalendar, boolean cinematicHome, boolean ambientGlow, int homeIdleClockMinutes,
++                   boolean posterWall, int posterWallCols, int posterWallTilt, String posterWallMode, int posterWallDur,
++                   int posterWallInterval, int posterWallHold, boolean posterWallAmbient, int posterWallAmbientEvery,
++                   int dockScalePercent, boolean posterWallDimDock, int posterWallGap,
++                   int posterWallVignette, int posterWallBlur, int posterWallFxRange) {
+         this.inputKeycodes = inputKeycodes;
+         this.appKeys = Collections.unmodifiableList(appKeys);
+         this.dockApps = Collections.unmodifiableList(dockApps);
+@@ -189,6 +224,21 @@ final class Config {
+         this.cinematicHome = cinematicHome;
+         this.ambientGlow = ambientGlow;
+         this.homeIdleClockMinutes = homeIdleClockMinutes;
++        this.posterWall = posterWall;
++        this.posterWallCols = posterWallCols;
++        this.posterWallTilt = posterWallTilt;
++        this.posterWallMode = posterWallMode;
++        this.posterWallDur = posterWallDur;
++        this.posterWallInterval = posterWallInterval;
++        this.posterWallHold = posterWallHold;
++        this.posterWallAmbient = posterWallAmbient;
++        this.posterWallAmbientEvery = posterWallAmbientEvery;
++        this.dockScalePercent = dockScalePercent;
++        this.posterWallDimDock = posterWallDimDock;
++        this.posterWallGap = posterWallGap;
++        this.posterWallVignette = posterWallVignette;
++        this.posterWallBlur = posterWallBlur;
++        this.posterWallFxRange = posterWallFxRange;
+     }
+ 
+     /** The folder the theme tools push into; null when external storage is unavailable. */
+@@ -196,6 +246,19 @@ final class Config {
+         return ctx.getExternalFilesDir(null);
+     }
+ 
++    private static int clamp(int v, int lo, int hi) {
++        return Math.max(lo, Math.min(hi, v));
++    }
++
++    /** The flip choreographies PosterWallView knows; anything else falls back to the default. */
++    private static String validPwMode(String m) {
++        for (String k : new String[]{"rippleRing", "ripple", "column", "row", "diagonal", "checker",
++                "spiral", "spiralIn", "random", "stagger", "converge", "splitflap"}) {
++            if (k.equals(m)) return k;
++        }
++        return "rippleRing";
++    }
++
+     static Config load(Context ctx) {
+         Resources res = ctx.getResources();
+         List<String> dock = new ArrayList<>(Arrays.asList(res.getStringArray(R.array.dock_apps)));
+@@ -239,6 +302,21 @@ final class Config {
+         boolean cinematic = res.getBoolean(R.bool.cinematic_home);
+         boolean ambientGlow = res.getBoolean(R.bool.ambient_glow);
+         int idleClockMinutes = res.getInteger(R.integer.home_idle_clock_minutes);
++        boolean posterWall = res.getBoolean(R.bool.poster_wall);
++        int pwCols = res.getInteger(R.integer.poster_wall_cols);
++        int pwTilt = res.getInteger(R.integer.poster_wall_tilt);
++        String pwMode = res.getString(R.string.poster_wall_mode).trim();
++        int pwDur = res.getInteger(R.integer.poster_wall_dur);
++        int pwInterval = res.getInteger(R.integer.poster_wall_interval);
++        int pwHold = res.getInteger(R.integer.poster_wall_hold);
++        boolean pwAmbient = res.getBoolean(R.bool.poster_wall_ambient);
++        int pwAmbientEvery = res.getInteger(R.integer.poster_wall_ambient_every);
++        int dockScale = res.getInteger(R.integer.dock_scale_percent);
++        boolean pwDimDock = res.getBoolean(R.bool.poster_wall_dim_dock);
++        int pwGap = res.getInteger(R.integer.poster_wall_gap);
++        int pwVignette = res.getInteger(R.integer.poster_wall_vignette);
++        int pwBlur = res.getInteger(R.integer.poster_wall_blur);
++        int pwFxRange = res.getInteger(R.integer.poster_wall_fx_range);
+         boolean applied = false;
+ 
+         File dir = dir(ctx);
+@@ -288,6 +366,21 @@ final class Config {
+             cinematic = bool(json, "cinematic_home", cinematic);
+             ambientGlow = bool(json, "ambient_glow", ambientGlow);
+             idleClockMinutes = integer(json, "home_idle_clock_minutes", idleClockMinutes, 0, 1440);
++            posterWall = bool(json, "poster_wall", posterWall);
++            pwCols = integer(json, "poster_wall_cols", pwCols, 5, 16);
++            pwTilt = integer(json, "poster_wall_tilt", pwTilt, 0, 12);
++            pwMode = string(json, "poster_wall_mode", pwMode);
++            pwDur = integer(json, "poster_wall_dur", pwDur, 250, 1500);
++            pwInterval = integer(json, "poster_wall_interval", pwInterval, 30, 500);
++            pwHold = integer(json, "poster_wall_hold", pwHold, 2, 40);
++            pwAmbient = bool(json, "poster_wall_ambient", pwAmbient);
++            pwAmbientEvery = integer(json, "poster_wall_ambient_every", pwAmbientEvery, 2, 30);
++            dockScale = integer(json, "dock_scale_percent", dockScale, 50, 100);
++            pwDimDock = bool(json, "poster_wall_dim_dock", pwDimDock);
++            pwGap = integer(json, "poster_wall_gap", pwGap, 0, 30);
++            pwVignette = integer(json, "poster_wall_vignette", pwVignette, 0, 150);
++            pwBlur = integer(json, "poster_wall_blur", pwBlur, 0, 24);
++            pwFxRange = integer(json, "poster_wall_fx_range", pwFxRange, 20, 90);
+         }
+         // A theme push or reset invalidates choices made on the TV. On first use, remember the
+         // current theme without clearing choices from an older launcher version.
+@@ -300,6 +393,18 @@ final class Config {
+         if (chosenRows >= 0 && chosenRows <= 3) rowsBelow = chosenRows;
+         animations = choices.getBoolean("animations", animations);
+         advancedEffects = choices.getBoolean("advanced_effects", advancedEffects);
++        // Poster wall on-TV adjustments (LauncherSettingsActivity). A theme push clears them
++        // (syncThemeChoices), so the theme's values win again after every push.
++        pwCols = clamp(choices.getInt("poster_wall_cols", pwCols), 5, 16);
++        pwTilt = clamp(choices.getInt("poster_wall_tilt", pwTilt), 0, 12);
++        pwGap = clamp(choices.getInt("poster_wall_gap", pwGap), 0, 30);
++        pwDur = clamp(choices.getInt("poster_wall_dur", pwDur), 250, 1500);
++        pwInterval = clamp(choices.getInt("poster_wall_interval", pwInterval), 30, 500);
++        pwHold = clamp(choices.getInt("poster_wall_hold", pwHold), 2, 40);
++        pwMode = validPwMode(choices.getString("poster_wall_mode", pwMode));
++        pwVignette = clamp(choices.getInt("poster_wall_vignette", pwVignette), 0, 150);
++        pwBlur = clamp(choices.getInt("poster_wall_blur", pwBlur), 0, 24);
++        pwFxRange = clamp(choices.getInt("poster_wall_fx_range", pwFxRange), 20, 90);
+         File wallpaper = dir != null ? new File(dir, WALLPAPER_NAME) : null;
+         if (wallpaper != null && !(wallpaper.isFile() && wallpaper.length() > 0)) wallpaper = null;
+         // A theme can also switch the wallpaper off while the file is still there.
+@@ -347,7 +452,14 @@ final class Config {
+                 Math.max(0, Math.min(100, skyIntensity)), settingsKeycodes, settingsKeyPanel, wallpaperEnabled, wallpaper,
+                 wallpapers, rotationMinutes, wallpaperDim, wallpaperOrder, applied,
+                 festival, inputKeycodes, appKeys, json == null ? Collections.emptyList() : raceCalendar(json), cinematic, ambientGlow,
+-                Math.max(0, idleClockMinutes));
++                Math.max(0, idleClockMinutes),
++                posterWall && json != null, Math.max(5, Math.min(16, pwCols)), Math.max(0, Math.min(12, pwTilt)),
++                pwMode, Math.max(250, Math.min(1500, pwDur)), Math.max(30, Math.min(500, pwInterval)),
++                Math.max(2, Math.min(40, pwHold)), pwAmbient, Math.max(2, Math.min(30, pwAmbientEvery)),
++                Math.max(50, Math.min(100, dockScale)), pwDimDock,
++                Math.max(0, Math.min(30, pwGap)),
++                Math.max(0, Math.min(150, pwVignette)), Math.max(0, Math.min(24, pwBlur)),
++                Math.max(20, Math.min(90, pwFxRange)));
+     }
+ 
+     /**
+@@ -390,11 +502,17 @@ final class Config {
+             // explicit theme push or reset by the updated tools.
+             SharedPreferences.Editor editor = choices.edit();
+             if (!"absent".equals(token)) editor.remove("columns").remove("animations")
+-                    .remove("advanced_effects").remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY);
++                    .remove("advanced_effects").remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY)
++                    .remove(PW_COLS_KEY).remove(PW_TILT_KEY).remove(PW_GAP_KEY)
++                    .remove(PW_DUR_KEY).remove(PW_INTERVAL_KEY).remove(PW_HOLD_KEY).remove(PW_MODE_KEY)
++                    .remove(PW_VIGNETTE_KEY).remove(PW_BLUR_KEY).remove(PW_FX_RANGE_KEY);
+             editor.putString(THEME_SIGNATURE_KEY, signature).commit();
+         } else if (!seen.equals(signature)) {
+             choices.edit().remove("columns").remove("animations").remove("advanced_effects")
+                     .remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY)
++                    .remove(PW_COLS_KEY).remove(PW_TILT_KEY).remove(PW_GAP_KEY)
++                    .remove(PW_DUR_KEY).remove(PW_INTERVAL_KEY).remove(PW_HOLD_KEY).remove(PW_MODE_KEY)
++                    .remove(PW_VIGNETTE_KEY).remove(PW_BLUR_KEY).remove(PW_FX_RANGE_KEY)
+                     .putString(THEME_SIGNATURE_KEY, signature).commit();
+         }
+     }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/DockDecoration.java b/launcher/app/src/main/java/com/gathin/tvhome/DockDecoration.java
+index 8810515..dbad77b 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/DockDecoration.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/DockDecoration.java
+@@ -48,13 +48,15 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
+     @Override
+     public void onDraw(@NonNull Canvas c, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+         boolean any = false;
++        float cardW = 0;
+         for (int i = 0; i < parent.getChildCount(); i++) {
+             View child = parent.getChildAt(i);
+             int pos = parent.getChildAdapterPosition(child);
+             if (pos < 0 || pos >= dockSize) continue;
+             RecyclerView.ViewHolder vh = parent.getChildViewHolder(child);
+             View card = vh instanceof AppAdapter.Holder ? ((AppAdapter.Holder) vh).card : child.findViewById(R.id.card);
+-            if (card == null) continue;
++            if (card == null || card.getVisibility() != View.VISIBLE) continue;  // 空槽（fill_dock=false）不撑底带
++            if (!any) cardW = card.getWidth();
+             float l = child.getLeft() + card.getLeft();
+             float t = child.getTop() + card.getTop() + child.getTranslationY();
+             float r = l + card.getWidth();
+@@ -74,7 +76,9 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
+         float side = Math.max(0f, Math.min(pad, Math.min(rect.left, parent.getWidth() - rect.right) - density));
+         rect.inset(-side, -pad);
+         rect.bottom += namesRoom;
+-        float radius = 26 * density;
++        // 底带圆角跟贴卡片自身的圆角（卡片缩小后圆角也变小，dock_scale_percent 时保持观感一致），
++        // 外扩 pad 后圆角同步加大，保持与卡片圆角同心。
++        float radius = AppAdapter.cornerRadius(Math.round(cardW), density) + pad;
+         c.drawRoundRect(rect, radius, radius, band);
+         c.drawRoundRect(rect, radius, radius, edge);
+     }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/LauncherSettingsActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/LauncherSettingsActivity.java
+index b48bc9e..58aa7d5 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/LauncherSettingsActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/LauncherSettingsActivity.java
+@@ -7,6 +7,7 @@ import android.content.Intent;
+ import android.content.SharedPreferences;
+ import android.os.Bundle;
+ import android.provider.Settings;
++import android.view.View;
+ import android.widget.LinearLayout;
+ import android.widget.TextView;
+ import android.widget.Toast;
+@@ -27,6 +28,26 @@ public final class LauncherSettingsActivity extends Activity {
+     private int rowsBelowDock;
+     private boolean animations;
+     private boolean advancedEffects;
++    // 海报墙参数（poster_wall 开启时显示；值写 choices，主题推送后清掉回到主题值）
++    private static final String[] PW_MODES = {"rippleRing", "ripple", "column", "row", "diagonal",
++            "checker", "spiral", "spiralIn", "random", "stagger", "converge", "splitflap"};
++    private static final String[] PW_MODE_LABELS = {"波纹递进（一圈圈展开）", "扩散缓动（双源渐远）",
++            "列扫（左→右）", "行扫（上→下）", "对角线推进", "棋盘两相交替", "螺旋（外→内）",
++            "螺旋（内→外）", "随机逐格", "风暴齐翻", "向心收拢", "翻牌时刻"};
++    private static final int[] PW_DUR = {300, 450, 600, 750, 900, 1100, 1300};
++    private static final int[] PW_INTERVAL = {40, 70, 100, 140, 180, 240, 320, 420};
++    private static final int[] PW_HOLD = {4, 6, 9, 12, 16, 20, 30};
++    private static final int[] PW_COLS = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
++    private static final int[] PW_TILT = {0, 2, 4, 6, 8, 10, 12};
++    private static final int[] PW_GAP = {0, 6, 10, 16, 24};
++    private static final int[] PW_VIGNETTE = {0, 30, 60, 90, 116, 135, 150};
++    private static final int[] PW_BLUR = {0, 4, 8, 10, 14, 18, 24};
++    private static final int[] PW_FX_RANGE = {30, 40, 50, 54, 60, 70, 80};
++    private TextView pwModeChoice, pwDurChoice, pwIntervalChoice, pwHoldChoice,
++            pwColsChoice, pwTiltChoice, pwGapChoice, pwVignetteChoice, pwBlurChoice,
++            pwFxRangeChoice, pwResetChoice;
++    private int pwDur, pwInterval, pwHold, pwCols, pwTilt, pwGap, pwVignette, pwBlur, pwFxRange;
++    private String pwMode;
+ 
+     @Override
+     protected void onCreate(Bundle state) {
+@@ -97,7 +118,12 @@ public final class LauncherSettingsActivity extends Activity {
+         followThemeChoice.setOnClickListener(v -> {
+             if (!hasOnTvChoices()) return;
+             choices.edit().remove("columns").remove(Config.ROWS_BELOW_DOCK_KEY).remove("animations")
+-                    .remove("advanced_effects").remove(Config.WALLPAPER_CHOICE_KEY).commit();
++                    .remove("advanced_effects").remove(Config.WALLPAPER_CHOICE_KEY)
++                    .remove(Config.PW_MODE_KEY).remove(Config.PW_COLS_KEY).remove(Config.PW_TILT_KEY)
++                    .remove(Config.PW_GAP_KEY).remove(Config.PW_DUR_KEY)
++                    .remove(Config.PW_INTERVAL_KEY).remove(Config.PW_HOLD_KEY)
++                    .remove(Config.PW_VIGNETTE_KEY).remove(Config.PW_BLUR_KEY)
++                    .remove(Config.PW_FX_RANGE_KEY).commit();
+             Config current = Config.load(this);
+             columns = current.columns;
+             rowsBelowDock = current.rowsBelowDock;
+@@ -112,10 +138,117 @@ public final class LauncherSettingsActivity extends Activity {
+         });
+         findViewById(R.id.tvSettingsChoice).setOnClickListener(v ->
+                 open(new Intent(Settings.ACTION_SETTINGS)));
++        wirePosterWall(config);
+         refresh();
+         columnChoices[Math.max(0, Math.min(columns - 4, 3))].requestFocus();
+     }
+ 
++    /** 海报墙参数区：点击行弹单选；确定即写 choices，回 Home 生效。 */
++    private void wirePosterWall(Config config) {
++        View section = findViewById(R.id.posterWallSection);
++        if (!config.posterWall) {
++            section.setVisibility(View.GONE);
++            return;
++        }
++        section.setVisibility(View.VISIBLE);
++        pwMode = config.posterWallMode;
++        pwDur = config.posterWallDur;
++        pwInterval = config.posterWallInterval;
++        pwHold = config.posterWallHold;
++        pwCols = config.posterWallCols;
++        pwTilt = config.posterWallTilt;
++        pwGap = config.posterWallGap;
++        pwVignette = config.posterWallVignette;
++        pwBlur = config.posterWallBlur;
++        pwFxRange = config.posterWallFxRange;
++        pwModeChoice = findViewById(R.id.pwModeChoice);
++        pwDurChoice = findViewById(R.id.pwDurChoice);
++        pwIntervalChoice = findViewById(R.id.pwIntervalChoice);
++        pwHoldChoice = findViewById(R.id.pwHoldChoice);
++        pwColsChoice = findViewById(R.id.pwColsChoice);
++        pwTiltChoice = findViewById(R.id.pwTiltChoice);
++        pwGapChoice = findViewById(R.id.pwGapChoice);
++        pwVignetteChoice = findViewById(R.id.pwVignetteChoice);
++        pwBlurChoice = findViewById(R.id.pwBlurChoice);
++        pwFxRangeChoice = findViewById(R.id.pwFxRangeChoice);
++        pwResetChoice = findViewById(R.id.pwResetChoice);
++        pwModeChoice.setOnClickListener(v -> pwPick("翻转模式", PW_MODE_LABELS, indexOf(PW_MODES, pwMode),
++                which -> { pwMode = PW_MODES[which]; savePw(Config.PW_MODE_KEY, pwMode); }));
++        pwDurChoice.setOnClickListener(v -> pwPickInt("翻转时长", PW_DUR, pwDur,
++                v2 -> { pwDur = v2; savePw(Config.PW_DUR_KEY, v2); }));
++        pwIntervalChoice.setOnClickListener(v -> pwPickInt("翻转间隔", PW_INTERVAL, pwInterval,
++                v2 -> { pwInterval = v2; savePw(Config.PW_INTERVAL_KEY, v2); }));
++        pwHoldChoice.setOnClickListener(v -> pwPickInt("停留时间", PW_HOLD, pwHold,
++                v2 -> { pwHold = v2; savePw(Config.PW_HOLD_KEY, v2); }));
++        pwColsChoice.setOnClickListener(v -> pwPickInt("列数", PW_COLS, pwCols,
++                v2 -> { pwCols = v2; savePw(Config.PW_COLS_KEY, v2); }));
++        pwTiltChoice.setOnClickListener(v -> pwPickInt("倾斜角", PW_TILT, pwTilt,
++                v2 -> { pwTilt = v2; savePw(Config.PW_TILT_KEY, v2); }));
++        pwGapChoice.setOnClickListener(v -> pwPickInt("间隙", PW_GAP, pwGap,
++                v2 -> { pwGap = v2; savePw(Config.PW_GAP_KEY, v2); }));
++        pwVignetteChoice.setOnClickListener(v -> pwPickInt("暗角强度", PW_VIGNETTE, pwVignette,
++                v2 -> { pwVignette = v2; savePw(Config.PW_VIGNETTE_KEY, v2); }));
++        pwBlurChoice.setOnClickListener(v -> pwPickInt("边缘模糊", PW_BLUR, pwBlur,
++                v2 -> { pwBlur = v2; savePw(Config.PW_BLUR_KEY, v2); }));
++        pwFxRangeChoice.setOnClickListener(v -> pwPickInt("效果范围", PW_FX_RANGE, pwFxRange,
++                v2 -> { pwFxRange = v2; savePw(Config.PW_FX_RANGE_KEY, v2); }));
++        pwResetChoice.setOnClickListener(v -> {
++            choices.edit().remove(Config.PW_MODE_KEY).remove(Config.PW_COLS_KEY)
++                    .remove(Config.PW_TILT_KEY).remove(Config.PW_GAP_KEY)
++                    .remove(Config.PW_DUR_KEY).remove(Config.PW_INTERVAL_KEY)
++                    .remove(Config.PW_HOLD_KEY)
++                    .remove(Config.PW_VIGNETTE_KEY).remove(Config.PW_BLUR_KEY)
++                    .remove(Config.PW_FX_RANGE_KEY).commit();
++            Config current = Config.load(this);
++            pwMode = current.posterWallMode;
++            pwDur = current.posterWallDur;
++            pwInterval = current.posterWallInterval;
++            pwHold = current.posterWallHold;
++            pwCols = current.posterWallCols;
++            pwTilt = current.posterWallTilt;
++            pwGap = current.posterWallGap;
++            pwVignette = current.posterWallVignette;
++            pwBlur = current.posterWallBlur;
++            pwFxRange = current.posterWallFxRange;
++            setResult(RESULT_OK);
++            refresh();
++        });
++    }
++
++    private void savePw(String key, Object value) {
++        if (value instanceof String) choices.edit().putString(key, (String) value).apply();
++        else choices.edit().putInt(key, (Integer) value).apply();
++        setResult(RESULT_OK);
++        refresh();
++    }
++
++    private void pwPick(String title, String[] options, int checked, java.util.function.Consumer<Integer> onPick) {
++        new AlertDialog.Builder(this)
++                .setTitle(title)
++                .setSingleChoiceItems(options, checked, (d, which) -> {
++                    d.dismiss();
++                    onPick.accept(which);
++                })
++                .setNegativeButton(android.R.string.cancel, null)
++                .show();
++    }
++
++    private void pwPickInt(String title, int[] values, int current, java.util.function.Consumer<Integer> onPick) {
++        String[] labels = new String[values.length];
++        int checked = 0;
++        for (int i = 0; i < values.length; i++) {
++            labels[i] = String.valueOf(values[i]);
++            if (values[i] == current) checked = i;
++        }
++        final int fChecked = checked;
++        pwPick(title, labels, fChecked, which -> onPick.accept(values[which]));
++    }
++
++    private static int indexOf(String[] arr, String v) {
++        for (int i = 0; i < arr.length; i++) if (arr[i].equals(v)) return i;
++        return 0;
++    }
++
+     private void reverseRow(TextView[] views) {
+         LinearLayout row = (LinearLayout) views[0].getParent();
+         row.removeAllViews();
+@@ -180,6 +313,19 @@ public final class LauncherSettingsActivity extends Activity {
+         for (int i = 0; i < rowChoices.length; i++) {
+             rowChoices[i].setSelected(rowsBelowDock == i);
+         }
++        if (pwModeChoice != null) {
++            String modeLabel = PW_MODE_LABELS[indexOf(PW_MODES, pwMode)];
++            pwModeChoice.setText("翻转模式：" + modeLabel);
++            pwDurChoice.setText("翻转时长：" + pwDur + "ms");
++            pwIntervalChoice.setText("翻转间隔：" + pwInterval + "ms");
++            pwHoldChoice.setText("停留时间：" + pwHold + " 秒");
++            pwColsChoice.setText("列数：" + pwCols);
++            pwTiltChoice.setText("倾斜角：" + pwTilt + "°");
++            pwGapChoice.setText("间隙：" + pwGap + "dp");
++            pwVignetteChoice.setText("暗角强度：" + pwVignette);
++            pwBlurChoice.setText("边缘模糊：" + pwBlur);
++            pwFxRangeChoice.setText("效果范围：" + pwFxRange);
++        }
+         animationsChoice.setText(getString(R.string.animations_state,
+                 getString(animations ? R.string.on : R.string.off)));
+         advancedChoice.setText(getString(R.string.advanced_effects_state,
+@@ -197,7 +343,13 @@ public final class LauncherSettingsActivity extends Activity {
+     private boolean hasOnTvChoices() {
+         return choices.contains("columns") || choices.contains(Config.ROWS_BELOW_DOCK_KEY)
+                 || choices.contains("animations") || choices.contains("advanced_effects")
+-                || choices.contains(Config.WALLPAPER_CHOICE_KEY);
++                || choices.contains(Config.WALLPAPER_CHOICE_KEY)
++                || choices.contains(Config.PW_MODE_KEY) || choices.contains(Config.PW_COLS_KEY)
++                || choices.contains(Config.PW_TILT_KEY) || choices.contains(Config.PW_GAP_KEY)
++                || choices.contains(Config.PW_DUR_KEY) || choices.contains(Config.PW_INTERVAL_KEY)
++                || choices.contains(Config.PW_HOLD_KEY)
++                || choices.contains(Config.PW_VIGNETTE_KEY) || choices.contains(Config.PW_BLUR_KEY)
++                || choices.contains(Config.PW_FX_RANGE_KEY);
+     }
+ 
+     private void open(Intent intent) {
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index e89977e..a91dd9b 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -161,6 +161,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     private String greetingName = "";
+     /** Optional time-of-day backdrop (config.xml, sky_intensity); 0 keeps it hidden. */
+     private SkyView sky;
++    /** Poster flip wall backdrop (config.json, poster_wall); sits behind everything when on. */
++    private PosterWallView posterWall;
++    private boolean posterWallOn;
+     private String vpnApp;
+     private SpringAnimation springX, springY;
+     private float glassTargetX, glassTargetY;
+@@ -329,7 +332,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         getWindow().setBackgroundDrawable(null);
+         wallpaperPlayer = new WallpaperPlayer(this, root, cfg);
+         sky = findViewById(R.id.sky);
+-        sky.setIntensity(cfg.skyIntensity);
++        sky.setIntensity(cfg.posterWall ? 0 : cfg.skyIntensity);
++        posterWall = findViewById(R.id.posterWall);
++        if (cfg.posterWall) {
++            posterWallOn = true;
++            posterWall.setVisibility(View.VISIBLE);
++            posterWall.configure(cfg, Config.dir(this));
++            posterWall.start();
++        }
+         glass = findViewById(R.id.glass);
+         if (festive) glass.setAccent(festival.accentColor());
+         ambient = findViewById(R.id.ambient);
+@@ -431,7 +441,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             public void onChildViewDetachedFromWindow(@NonNull View v) {
+             }
+         });
+-        if (dockRow) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames));
++        if (dockRow) grid.addItemDecoration(new DockDecoration(COLUMNS, density,
++                cinematic || (cfg.posterWall && cfg.posterWallDimDock), cfg.alwaysShowNames));
+         if (animations) {
+             int enterAnim = reducedMotion ? R.anim.tile_enter_reduced : R.anim.tile_enter;
+             float enterDelay = reducedMotion ? 0f : 0.06f;
+@@ -453,7 +464,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             int inner = (r - l) - grid.getPaddingLeft() - grid.getPaddingRight();
+             int tileW = AppAdapter.tileWidthPx(inner, h, COLUMNS, rowsBelowDock, cfg.dockTitle, cfg.dockRow, density);
+             int itemH = AppAdapter.itemHeightPx(AppAdapter.tileHeightPx(tileW), density);
+-            int dockRow = itemH + (int) (AppAdapter.DOCK_EXTRA_DP * density);   // item height plus DockDecoration offsets
++            // A shrunken dock (dock_scale_percent) frees screen height for the rows and the backdrop.
++            int dockItemH = AppAdapter.itemHeightPx(
++                    AppAdapter.tileHeightPx(Math.round(tileW * cfg.dockScalePercent / 100f)), density);
++            int dockRow = dockItemH + (int) (AppAdapter.DOCK_EXTRA_DP * density);   // item height plus DockDecoration offsets
+             int gridRows = itemH * rowsBelowDock;
+             // Keep the hero below the header when the library is enabled on a short screen,
+             // even when the theme requests an extra visible row below the dock.
+@@ -650,6 +664,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         }
+         restartIdleClock();
+         promptsPaused = false;
++        if (posterWall != null && posterWallOn) {
++            // 设置页可能改了参数：重读 Config，列数/倾角/间隙变了就地重建格子
++            posterWall.reconfigure(Config.load(this), Config.dir(this));
++            posterWall.setPaused(false);
++        }
+         if (grid.getAdapter() == null) grid.setAdapter(adapter);   // dropped by onTrimMemory
+         if (rebuildOnResume) {
+             tilesReady = false;
+@@ -787,6 +806,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         root.removeCallbacks(showIdleClock);
+         endReorder();   // Home or another app while reordering keeps the order so far
+         wallpaperPlayer.stop();
++        if (posterWall != null) posterWall.setPaused(true);
+         stopAmbientAnimation();
+         hero.animate().cancel();
+         ambient.animate().cancel();
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/PosterWallView.java b/launcher/app/src/main/java/com/gathin/tvhome/PosterWallView.java
+new file mode 100644
+index 0000000..2a3ec32
+--- /dev/null
++++ b/launcher/app/src/main/java/com/gathin/tvhome/PosterWallView.java
+@@ -0,0 +1,918 @@
++package com.gathin.tvhome;
++
++import android.content.Context;
++import android.graphics.Bitmap;
++import android.graphics.BitmapFactory;
++import android.graphics.Canvas;
++import android.graphics.Color;
++import android.graphics.LinearGradient;
++import android.graphics.Paint;
++import android.graphics.PorterDuff;
++import android.graphics.PorterDuffXfermode;
++import android.graphics.Shader;
++import android.os.Handler;
++import android.os.Looper;
++import android.renderscript.Allocation;
++import android.renderscript.Element;
++import android.renderscript.RenderScript;
++import android.renderscript.ScriptIntrinsicBlur;
++import android.util.AttributeSet;
++import android.util.LruCache;
++import android.view.Gravity;
++import android.view.animation.DecelerateInterpolator;
++import android.widget.FrameLayout;
++import android.widget.ImageView;
++
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.nio.charset.StandardCharsets;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.HashMap;
++import java.util.Iterator;
++import java.util.List;
++import java.util.Map;
++import java.util.Random;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * The poster flip wall: movie posters in a slightly tilted grid that flips between colour moods —
++ * the phone preview's engine (poster-wall/index.html) ported one-to-one. Data comes from
++ * {@code files/posterwall/manifest.json + posters/}, pushed with the theme; the board sits behind
++ * the launcher as the backdrop layer.
++ *
++ * A flip is the classic two-stage Android card flip (CSS has backface-visibility, Android does
++ * not): the card turns to edge-on at 90°, the face swaps, then it turns the rest of the way.
++ * Manifest parsing and bitmap decoding run on a background executor; flips and scheduling run on
++ * the main thread through a Handler whose pending callbacks are tracked, so {@link #setPaused(boolean)}
++ * freezes and restarts the choreography cleanly.
++ */
++public class PosterWallView extends FrameLayout {
++
++    private static final class Poster {
++        final String file;      // "posters/xxx.jpg", relative to the posterwall dir
++        final String title;
++        final int dom;          // dominant colour; placeholder tiles paint with it
++        final boolean ph;       // no image: draw a colour placeholder
++        Poster(String file, String title, int dom, boolean ph) {
++            this.file = file;
++            this.title = title;
++            this.dom = dom;
++            this.ph = ph;
++        }
++    }
++
++    private static final class Cell {
++        FrameLayout card;
++        ImageView front;
++        ImageView back;
++        int cur = -1;
++        boolean busy;
++        int c;
++        int r;
++    }
++
++    private static final class FlipEntry {
++        final int idx;
++        final long t;
++        final int dur;
++        FlipEntry(int idx, long t, int dur) {
++            this.idx = idx;
++            this.t = t;
++            this.dur = dur;
++        }
++    }
++
++    private static final class ManifestData {
++        final List<Poster> posters = new ArrayList<>();
++        final Map<String, List<Integer>> moods = new HashMap<>();
++
++        static ManifestData load(File file) {
++            if (!file.isFile()) return null;
++            try (FileInputStream in = new FileInputStream(file)) {
++                byte[] b = new byte[(int) file.length()];
++                int off = 0;
++                while (off < b.length) {
++                    int n = in.read(b, off, b.length - off);
++                    if (n < 0) break;
++                    off += n;
++                }
++                JSONObject json = new JSONObject(new String(b, 0, off, StandardCharsets.UTF_8));
++                ManifestData data = new ManifestData();
++                JSONArray ps = json.getJSONArray("posters");
++                for (int i = 0; i < ps.length(); i++) {
++                    JSONObject p = ps.getJSONObject(i);
++                    int dom;
++                    try {
++                        dom = Color.parseColor(p.optString("dom", "#333333"));
++                    } catch (IllegalArgumentException ignored) {
++                        dom = 0xFF333333;
++                    }
++                    data.posters.add(new Poster(p.optString("file", ""), p.optString("title", ""),
++                            dom, p.optBoolean("ph", false)));
++                }
++                JSONObject ms = json.getJSONObject("moods");
++                Iterator<String> it = ms.keys();
++                while (it.hasNext()) {
++                    String name = it.next();
++                    JSONArray arr = ms.getJSONArray(name);
++                    List<Integer> idx = new ArrayList<>();
++                    for (int i = 0; i < arr.length(); i++) idx.add(arr.getInt(i));
++                    data.moods.put(name, idx);
++                }
++                return data;
++            } catch (Exception e) {
++                return null;
++            }
++        }
++    }
++
++    private final float density;
++    private final Random rnd = new Random();
++    private final Handler handler = new Handler(Looper.getMainLooper());
++    private final ExecutorService io = Executors.newSingleThreadExecutor();
++    private final LruCache<String, Bitmap> cache;
++    private final List<Cell> cells = new ArrayList<>();
++    private final Map<String, List<Integer>> moods = new HashMap<>();
++    private final List<Poster> posters = new ArrayList<>();
++
++    private int cols = 9;
++    private int tilt = 6;
++    private int gapDp = 10;
++    private String mode = "rippleRing";
++    private int dur = 650;
++    private int interval = 110;
++    private int hold = 9;
++    private boolean ambient = true;
++    private int ambientEvery = 8;
++    private int vig = 42;
++    private int blur = 5;
++    private int fxRange = 58;
++
++    private File dir;
++    private FrameLayout board;
++    private ImageView vignetteView;   // 暗角贴图层（Canvas 生成，盖在棋盘上）
++    private ImageView blurView;       // 边缘模糊层（快照 + RenderScript 模糊 + 径向蒙版）
++    private RenderScript rs;
++    private ScriptIntrinsicBlur blurScript;
++    private Allocation rsIn, rsOut;
++    private Bitmap snapBmp, blurBmp, outBmp, maskBmp;
++    private int maskRange = -1;
++    private Bitmap vigBmp;            // 暗角贴图缓存
++    private String vigKey = "";
++    private long lastSnap;
++    private boolean paused;
++    private int rows;
++    private int cellW = 200;
++    private int cellH = 300;
++    private boolean running;
++    private boolean dataReady;
++    private boolean transActive;
++    private String mood;
++    private int modeCursor;
++    private final String[] modes = {"rippleRing", "column", "row", "diagonal", "checker",
++            "spiral", "spiralIn", "random", "ripple", "stagger", "converge", "splitflap"};
++    private final List<Runnable> pending = new ArrayList<>();
++    private long ambientLast;
++
++    public PosterWallView(Context context, AttributeSet attrs) {
++        super(context, attrs);
++        density = getResources().getDisplayMetrics().density;
++        int maxKb = (int) (Runtime.getRuntime().maxMemory() / 1024 / 5);
++        cache = new LruCache<String, Bitmap>(Math.max(24 * 1024, maxKb)) {
++            @Override protected int sizeOf(String key, Bitmap value) {
++                return value.getByteCount() / 1024;
++            }
++        };
++        setClipChildren(false);
++    }
++
++    /** Values come from Config; call before the view is attached. */
++    void configure(Config cfg, File themeDir) {
++        cols = cfg.posterWallCols;
++        tilt = cfg.posterWallTilt;
++        gapDp = cfg.posterWallGap;
++        mode = validMode(cfg.posterWallMode);
++        dur = cfg.posterWallDur;
++        interval = cfg.posterWallInterval;
++        hold = cfg.posterWallHold;
++        ambient = cfg.posterWallAmbient;
++        ambientEvery = cfg.posterWallAmbientEvery;
++        vig = cfg.posterWallVignette;
++        blur = cfg.posterWallBlur;
++        fxRange = cfg.posterWallFxRange;
++        dir = themeDir;
++    }
++
++    /** Settings changed on the TV: pick up new values; layout keys rebuild the grid in place. */
++    void reconfigure(Config cfg, File themeDir) {
++        boolean layoutChanged = cfg.posterWallCols != cols || cfg.posterWallTilt != tilt
++                || cfg.posterWallGap != gapDp;
++        boolean fxChanged = cfg.posterWallVignette != vig || cfg.posterWallBlur != blur
++                || cfg.posterWallFxRange != fxRange;
++        configure(cfg, themeDir);
++        if (!dataReady || !running) return;
++        if (layoutChanged) {
++            cancelPending();
++            buildGrid();
++            fillInstant(mood == null ? biggestMood() : mood);
++        } else if (fxChanged) {
++            refreshOverlays();
++            if (blurScript != null) blurScript.setRadius(Math.max(2f, Math.min(25f, blur * 0.4f)));
++            if (!transActive) takeSnapshot();
++        }
++        scheduleTour(1500);
++    }
++
++    private String validMode(String m) {
++        if (m == null) return "rippleRing";
++        for (String k : modes) if (k.equals(m)) return k;
++        return "rippleRing";
++    }
++
++    /** Starts loading data and the choreography; safe to call twice. */
++    void start() {
++        if (running || dir == null) return;
++        running = true;
++        File base = new File(dir, "posterwall");
++        io.execute(() -> {
++            ManifestData data = ManifestData.load(new File(base, "manifest.json"));
++            handler.post(() -> {
++                if (!running || data == null || data.posters.isEmpty()) return;
++                posters.clear();
++                posters.addAll(data.posters);
++                moods.clear();
++                moods.putAll(data.moods);
++                dataReady = true;
++                buildGrid();
++                fillInstant(biggestMood());
++                preload();
++                handler.postDelayed(() -> {
++                    if (running && !transActive) takeSnapshot();
++                }, 300);
++                scheduleTour(hold * 1000L);
++            });
++        });
++    }
++
++    /** Cancels every pending flip and the tour; cached bitmaps stay. */
++    void stop() {
++        running = false;
++        handler.removeCallbacksAndMessages(null);
++        pending.clear();
++        io.shutdownNow();
++        if (rs != null) {
++            rs.destroy();
++            rs = null;
++        }
++    }
++
++    /** Home pauses (an app opened) or resumes: freeze, then restart the tour fresh. */
++    void setPaused(boolean value) {
++        paused = value;
++        if (value) {
++            cancelPending();
++            handler.removeCallbacks(ambientRun);
++            handler.removeCallbacks(snapRun);
++        } else if (running) {
++            handler.removeCallbacks(ambientRun);
++            handler.post(ambientRun);
++            if (transActive) handler.postDelayed(snapRun, 160);
++            scheduleTour(1500);
++        }
++    }
++
++    /* ---------------- grid ---------------- */
++
++    /** Grid sized to cover the screen even when the board is rotated by the tilt angle. */
++    private void buildGrid() {
++        int w = getWidth();
++        int h = getHeight();
++        if (w == 0 || h == 0) return;
++        double th = Math.toRadians(tilt);
++        int covW = (int) ((w * Math.cos(th) + h * Math.sin(th)) * 1.16);
++        int covH = (int) ((w * Math.sin(th) + h * Math.cos(th)) * 1.16);
++        int gap = Math.round(gapDp * density);
++        cellW = (covW - gap * (cols - 1)) / cols;
++        cellH = cellW * 3 / 2;
++        rows = Math.max(1, (int) Math.ceil((covH - gap) / (double) (cellH + gap)));
++        removeAllViews();
++        cells.clear();
++        FrameLayout boardWrap = new FrameLayout(getContext());
++        boardWrap.setClipChildren(false);
++        board = new FrameLayout(getContext());
++        board.setClipChildren(false);
++        board.setRotation(tilt);
++        LayoutParams blp = new LayoutParams(covW, covH);
++        blp.gravity = Gravity.CENTER;
++        boardWrap.addView(board, blp);
++        addView(boardWrap, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
++        for (int r = 0; r < rows; r++) {
++            for (int c = 0; c < cols; c++) {
++                Cell cell = new Cell();
++                cell.c = c;
++                cell.r = r;
++                FrameLayout card = new FrameLayout(getContext());
++                card.setClipChildren(false);
++                card.setCameraDistance(density * 4800);
++                ImageView front = face();
++                ImageView back = face();
++                back.setRotationY(180f);
++                back.setVisibility(INVISIBLE);
++                card.addView(front, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
++                card.addView(back, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
++                cell.card = card;
++                cell.front = front;
++                cell.back = back;
++                FrameLayout cellView = new FrameLayout(getContext());
++                cellView.setClipChildren(false);
++                cellView.addView(card, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
++                LayoutParams lp = new LayoutParams(cellW, cellH);
++                lp.leftMargin = c * (cellW + gap);
++                lp.topMargin = r * (cellH + gap);
++                board.addView(cellView, lp);
++                cells.add(cell);
++            }
++        }
++        ensureOverlays();
++    }
++
++    /** 暗角/模糊两层一次性挂载（格子重建会 removeAllViews，所以每次都要重挂）。 */
++    private void ensureOverlays() {
++        if (vignetteView == null) {
++            vignetteView = new ImageView(getContext());
++            blurView = new ImageView(getContext());
++        }
++        LayoutParams full = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
++        if (vignetteView.getParent() == null) addView(vignetteView, full);
++        if (blurView.getParent() == null) addView(blurView, full);
++        blurView.bringToFront();   // 模糊层在暗角之上
++        int sw = 480, sh = 270;
++        if (snapBmp == null) {
++            snapBmp = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
++            blurBmp = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
++            outBmp = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
++        }
++        if (rs == null) {
++            try {
++                rs = RenderScript.create(getContext());
++                rsIn = Allocation.createFromBitmap(rs, snapBmp);
++                rsOut = Allocation.createTyped(rs, rsIn.getType());
++                blurScript = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs));
++                blurScript.setRadius(Math.max(2f, Math.min(25f, blur * 0.4f)));
++            } catch (Throwable t) {
++                rs = null;   // RS 不可用则模糊层退化为快照原样
++            }
++        }
++        blurView.setImageBitmap(outBmp);
++        refreshOverlays();
++    }
++
++    /* ---------------- 画面效果层（暗角 + 边缘模糊）---------------- */
++
++    /** 暗角/模糊两层盖在棋盘上、位于启动器 UI 之下；参数变化后重画贴图/蒙版。 */
++    private void refreshOverlays() {
++        if (vignetteView == null) return;
++        String vigKey2 = vig + "|" + fxRange;
++        if (vigBmp == null || !vigKey2.equals(vigKey)) {
++            vigKey = vigKey2;
++            vigBmp = makeRadialBitmap(vig / 100f * 0.85f, fxRange, false);
++            vignetteView.setImageBitmap(vigBmp);
++        }
++        vignetteView.setVisibility(vig > 0 ? VISIBLE : GONE);
++        blurView.setVisibility(blur > 0 ? VISIBLE : GONE);
++        if (maskBmp == null || maskRange != fxRange) {
++            maskRange = fxRange;
++            maskBmp = makeRadialBitmap(1f, fxRange, true);
++        }
++    }
++
++    /** 椭圆径向 alpha 贴图：depth=1 时纯蒙版（alpha 只随距离），否则 alpha = t*depth。 */
++    private Bitmap makeRadialBitmap(float depth, int range, boolean maskOnly) {
++        int w = 320, h = 180;
++        Bitmap bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
++        int[] px = new int[w * h];
++        float cx = w * 0.5f, cy = h * 0.46f, rx = w * 1.2f, ry = h * 0.9f;
++        float d0 = range / 100f - 0.16f, d1 = range / 100f + 0.16f;
++        for (int y = 0; y < h; y++) {
++            for (int x = 0; x < w; x++) {
++                float dx = (x - cx) / rx, dy = (y - cy) / ry;
++                float d = (float) Math.sqrt(dx * dx + dy * dy);
++                float t = Math.max(0, Math.min(1, (d - d0) / (d1 - d0)));
++                int alpha = Math.round(Math.min(1, t * (maskOnly ? 1f : depth)) * 255);
++                px[y * w + x] = (alpha << 24);   // 黑
++            }
++        }
++        bm.setPixels(px, 0, w, 0, 0, w, h);
++        return bm;
++    }
++
++    /** 边缘模糊：当前墙画进复用快照 → RenderScript 模糊 → 径向蒙版 → 模糊层（零分配）。
++     *  翻转期间由 snapRun 以 160ms 连续调用（模糊内容跟上翻转，落定自然对齐）；
++     *  静止期只在零星换片/参数变化后调用一次。 */
++    private void takeSnapshot() {
++        if (blur <= 0 || getWidth() == 0 || rs == null || snapBmp == null) return;
++        Canvas c = new Canvas(snapBmp);
++        c.scale(480f / (float) getWidth(), 270f / (float) getHeight());
++        blurView.setVisibility(INVISIBLE);   // 模糊层自身不进快照
++        draw(c);
++        blurView.setVisibility(VISIBLE);
++        rsIn.copyFrom(snapBmp);
++        blurScript.forEach(rsOut);
++        rsOut.copyTo(blurBmp);
++        Canvas oc = new Canvas(outBmp);
++        oc.drawBitmap(blurBmp, 0, 0, null);
++        Paint pm = new Paint();
++        pm.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
++        oc.drawBitmap(maskBmp, 0, 0, pm);
++        pm.setXfermode(null);
++        blurView.invalidate();
++    }
++
++    /** 翻转期间 160ms 一帧的连续快照，让模糊内容跟上翻转；落定后由 settle 接管。 */
++    private final Runnable snapRun = new Runnable() {
++        @Override public void run() {
++            if (!running || paused) return;
++            if (!transActive) return;   // 墙静止：由零星换片/落定回调负责
++            takeSnapshot();
++            handler.postDelayed(this, 160);
++        }
++    };
++
++    /** 模糊层的径向蒙版（快照尺寸）：中心 alpha 0、边缘 1。 */
++    private Bitmap maskBitmap(int w, int h) {
++        if (maskBmp != null && maskBmp.getWidth() == w && maskRange == fxRange) {
++            return maskBmp;
++        }
++        Bitmap bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
++        int[] px = new int[w * h];
++        float cx = w * 0.5f, cy = h * 0.46f, rx = w * 1.2f, ry = h * 0.9f;
++        float d0 = fxRange / 100f, d1 = fxRange / 100f + 0.16f;
++        for (int y = 0; y < h; y++) {
++            for (int x = 0; x < w; x++) {
++                float dx = (x - cx) / rx, dy = (y - cy) / ry;
++                float d = (float) Math.sqrt(dx * dx + dy * dy);
++                float t = Math.max(0, Math.min(1, (d - d0) / (d1 - d0)));
++                px[y * w + x] = Math.round(t * 255) << 24;
++            }
++        }
++        bm.setPixels(px, 0, w, 0, 0, w, h);
++        maskBmp = bm;
++        maskRange = fxRange;
++        return bm;
++    }
++
++    private ImageView face() {
++        ImageView iv = new ImageView(getContext());
++        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
++        return iv;
++    }
++
++    /* ---------------- images ---------------- */
++
++    private Bitmap bitmap(int idx) {
++        if (idx < 0 || idx >= posters.size()) return null;
++        Poster p = posters.get(idx);
++        String key = p.ph ? "ph:" + idx : p.file;
++        Bitmap hit = cache.get(key);
++        if (hit != null) return hit;
++        Bitmap bm = p.ph ? placeholder(idx) : decode(p);
++        if (bm != null) cache.put(key, bm);
++        return bm;
++    }
++
++    private Bitmap decode(Poster p) {
++        try {
++            File f = new File(dir, "posterwall" + File.separator + p.file);
++            BitmapFactory.Options o = new BitmapFactory.Options();
++            o.inJustDecodeBounds = true;
++            BitmapFactory.decodeFile(f.getAbsolutePath(), o);
++            int sample = 1;
++            while (o.outWidth / (sample * 2) >= cellW * 1.4f) sample *= 2;
++            o = new BitmapFactory.Options();
++            o.inSampleSize = sample;
++            o.inPreferredConfig = Bitmap.Config.RGB_565;
++            return BitmapFactory.decodeFile(f.getAbsolutePath(), o);
++        } catch (Throwable t) {
++            return null;
++        }
++    }
++
++    /** Colour-gradient tile with the movie title, for posters the pipeline could not fetch. */
++    private Bitmap placeholder(int idx) {
++        Poster p = posters.get(idx);
++        int w = Math.max(60, cellW), h = Math.max(90, cellH);
++        Bitmap bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
++        Canvas cv = new Canvas(bm);
++        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
++        paint.setShader(new LinearGradient(0, 0, w / 3f, h, p.dom, 0xFF0C0C10, Shader.TileMode.CLAMP));
++        cv.drawPaint(paint);
++        paint.setShader(null);
++        paint.setColor(0xF2FFFFFF);
++        paint.setTextSize(Math.max(11, w * 0.085f));
++        paint.setTextAlign(Paint.Align.CENTER);
++        String title = p.title == null ? "" : p.title;
++        int y = h / 2;
++        int line = (int) (paint.getTextSize() * 1.3f);
++        int per = Math.max(3, (int) (w / (paint.getTextSize() * 1.05f)));
++        int start = 0;
++        while (start < title.length() && y < h - 6) {
++            int end = Math.min(title.length(), start + per);
++            cv.drawText(title.substring(start, end), w / 2f, y, paint);
++            start = end;
++            y += line;
++        }
++        return bm;
++    }
++
++    private void preload() {
++        io.execute(() -> {
++            List<Integer> warm = new ArrayList<>();
++            for (List<Integer> pool : moods.values()) {
++                for (int i = 0; i < Math.min(pool.size(), 14); i++) warm.add(pool.get(i));
++            }
++            for (int idx : warm) {
++                if (!running) return;
++                bitmap(idx);
++            }
++        });
++    }
++
++    /* ---------------- mood pools and targets ---------------- */
++
++    private List<Integer> poolOf(String name) {
++        List<Integer> pool = moods.get(name);
++        if (pool != null && !pool.isEmpty()) return pool;
++        List<Integer> best = null;
++        for (List<Integer> p : moods.values()) {
++            if (best == null || p.size() > best.size()) best = p;
++        }
++        return best != null ? best : Collections.<Integer>emptyList();
++    }
++
++    private String biggestMood() {
++        String best = null;
++        for (Map.Entry<String, List<Integer>> e : moods.entrySet()) {
++            if (!e.getValue().isEmpty() && (best == null || e.getValue().size() > moods.get(best).size())) best = e.getKey();
++        }
++        return best;
++    }
++
++    private int[] assignTargets(String name) {
++        List<Integer> pool = poolOf(name);
++        List<Integer> bag = new ArrayList<>();
++        while (bag.size() < cells.size()) bag.addAll(shuffled(pool));
++        int off = bag.isEmpty() ? 0 : rnd.nextInt(pool.size());
++        int[] targets = new int[cells.size()];
++        for (int i = 0; i < cells.size(); i++) {
++            int t = bag.get((i + off) % bag.size());
++            if (t == cells.get(i).cur) t = bag.get((i + off + 1) % bag.size());
++            targets[i] = t;
++        }
++        return targets;
++    }
++
++    private List<Integer> shuffled(List<Integer> src) {
++        List<Integer> out = new ArrayList<>(src);
++        Collections.shuffle(out, rnd);
++        return out;
++    }
++
++    /* ---------------- flips ---------------- */
++
++    /** Two-stage card flip: to edge-on at 90°, swap the face, then finish — Android has no
++     *  backface-visibility, so both faces stay in the tree and hide at the midpoint. */
++    private void flip(Cell cell, int target, int flipDur) {
++        if (cell.busy || target < 0 || target == cell.cur) return;
++        cell.busy = true;
++        final Bitmap bmp = bitmap(target);
++        final boolean axisX = rnd.nextBoolean();
++        final float dir = rnd.nextBoolean() ? 1f : -1f;
++        final int half = Math.max(80, flipDur / 2);
++        DecelerateInterpolator ease = new DecelerateInterpolator(1.1f);
++        if (axisX) {
++            cell.card.animate().rotationX(90f * dir).rotationY(0f).setDuration(half).setInterpolator(ease)
++                    .withEndAction(() -> {
++                        cell.front.setVisibility(INVISIBLE);
++                        cell.back.setRotationX(180f);
++                        cell.back.setRotationY(0f);
++                        if (bmp != null) cell.back.setImageBitmap(bmp);
++                        cell.back.setVisibility(VISIBLE);
++                        cell.card.animate().rotationX(180f * dir).setDuration(half).setInterpolator(ease)
++                                .withEndAction(() -> settle(cell, target, bmp)).start();
++                    }).start();
++        } else {
++            cell.card.animate().rotationY(90f * dir).rotationX(0f).setDuration(half).setInterpolator(ease)
++                    .withEndAction(() -> {
++                        cell.front.setVisibility(INVISIBLE);
++                        cell.back.setRotationY(180f);
++                        cell.back.setRotationX(0f);
++                        if (bmp != null) cell.back.setImageBitmap(bmp);
++                        cell.back.setVisibility(VISIBLE);
++                        cell.card.animate().rotationY(180f * dir).setDuration(half).setInterpolator(ease)
++                                .withEndAction(() -> settle(cell, target, bmp)).start();
++                    }).start();
++        }
++    }
++
++    private void settle(Cell cell, int target, Bitmap bmp) {
++        cell.cur = target;
++        if (bmp != null) cell.front.setImageBitmap(bmp);
++        cell.front.setVisibility(VISIBLE);
++        cell.back.setVisibility(INVISIBLE);
++        cell.card.setRotationY(0f);
++        cell.card.setRotationX(0f);
++        cell.busy = false;
++    }
++
++    private void setFace(ImageView face, int idx) {
++        Bitmap bmp = bitmap(idx);
++        if (bmp != null) face.setImageBitmap(bmp);
++        else face.setImageDrawable(null);
++    }
++
++    private void fillInstant(String name) {
++        if (!dataReady || cells.isEmpty()) return;
++        int[] targets = assignTargets(name);
++        for (int i = 0; i < cells.size(); i++) {
++            cells.get(i).cur = targets[i];
++            setFace(cells.get(i).front, targets[i]);
++        }
++        mood = name;
++    }
++
++    /* ---------------- choreography (ported from poster-wall/index.html) ---------------- */
++
++    private List<FlipEntry> schedule(String m, int baseDur) {
++        int n = cells.size();
++        List<FlipEntry> out = new ArrayList<>();
++        if (n == 0) return out;
++        long itv = interval;
++        switch (m) {
++            case "random": {
++                List<Integer> order = new ArrayList<>();
++                for (int i = 0; i < n; i++) order.add(i);
++                Collections.shuffle(order, rnd);
++                for (int k = 0; k < n; k++)
++                    out.add(new FlipEntry(order.get(k), k * itv + jitter(itv * 0.3), baseDur));
++                break;
++            }
++            case "column":
++                for (int c = 0; c < cols; c++)
++                    for (int row = 0; row < rows; row++)
++                        out.add(new FlipEntry(row * cols + c,
++                                (long) (c * rows * itv * 0.55 + row * itv * 0.55) + jitter(itv * 0.4), baseDur));
++                break;
++            case "row":
++                for (int row = 0; row < rows; row++)
++                    for (int c = 0; c < cols; c++)
++                        out.add(new FlipEntry(row * cols + c,
++                                (long) (row * cols * itv * 0.55 + c * itv * 0.55) + jitter(itv * 0.4), baseDur));
++                break;
++            case "diagonal":
++                for (int i = 0; i < n; i++)
++                    out.add(new FlipEntry(i, (long) ((cells.get(i).c + cells.get(i).r) * itv * 1.15) + jitter(itv * 0.5), baseDur));
++                break;
++            case "checker": {
++                long spread = Math.max(900, (long) (n * itv * 0.32));
++                List<Integer> even = new ArrayList<>(), odd = new ArrayList<>();
++                for (int i = 0; i < n; i++) {
++                    if ((cells.get(i).c + cells.get(i).r) % 2 == 0) even.add(i);
++                    else odd.add(i);
++                }
++                Collections.shuffle(even, rnd);
++                Collections.shuffle(odd, rnd);
++                for (int i : even) out.add(new FlipEntry(i, (long) (rnd.nextFloat() * spread), baseDur));
++                for (int i : odd) out.add(new FlipEntry(i, spread + (long) (rnd.nextFloat() * spread), baseDur));
++                break;
++            }
++            case "spiral":
++            case "spiralIn": {
++                int[] order = spiralOrder(cols, rows);
++                Map<Integer, Integer> rank = new HashMap<>();
++                for (int k = 0; k < order.length; k++) rank.put(order[k], k);
++                for (int i = 0; i < n; i++) {
++                    int k = rank.containsKey(i) ? rank.get(i) : 0;
++                    double t = m.equals("spiral") ? k * itv * 0.6 : (order.length - 1 - k) * itv * 0.6;
++                    out.add(new FlipEntry(i, (long) t + jitter(itv * 0.3), baseDur));
++                }
++                break;
++            }
++            case "ripple": {
++                int seed = rnd.nextInt(n);
++                int seed2 = (seed + n / 2) % n;
++                Cell a = cells.get(seed), b = cells.get(seed2);
++                for (int i = 0; i < n; i++) {
++                    double d = Math.min(Math.hypot(cells.get(i).c - a.c, cells.get(i).r - a.r),
++                            Math.hypot(cells.get(i).c - b.c, cells.get(i).r - b.r));
++                    out.add(new FlipEntry(i, (long) (d * itv * 1.35) + jitter(itv * 0.6), baseDur));
++                }
++                break;
++            }
++            case "rippleRing": {
++                // 每次随机一个中心格，从它一圈圈向外递进
++                Cell seed = cells.get(rnd.nextInt(n));
++                long ringItv = Math.min(340, Math.max(100, (long) (itv * 1.8)));
++                for (int i = 0; i < n; i++) {
++                    int ring = Math.max(Math.abs(cells.get(i).c - seed.c), Math.abs(cells.get(i).r - seed.r));
++                    out.add(new FlipEntry(i, ring * ringItv + jitter(ringItv * 0.35), baseDur));
++                }
++                break;
++            }
++            case "converge": {
++                double cc = (cols - 1) / 2.0, rr = (rows - 1) / 2.0, maxD = 0;
++                double[] ds = new double[n];
++                for (int i = 0; i < n; i++) {
++                    ds[i] = Math.hypot(cells.get(i).c - cc, cells.get(i).r - rr);
++                    maxD = Math.max(maxD, ds[i]);
++                }
++                for (int i = 0; i < n; i++)
++                    out.add(new FlipEntry(i, (long) ((maxD - ds[i]) * itv * 1.35) + jitter(itv * 0.6), baseDur));
++                break;
++            }
++            case "stagger": {
++                long spread = Math.min(4200, Math.max(1100, (long) (n * itv * 0.28)));
++                for (int i = 0; i < n; i++)
++                    out.add(new FlipEntry(i, (long) (Math.pow(rnd.nextFloat(), 1.35) * spread), baseDur));
++                break;
++            }
++            case "splitflap": {
++                int d2 = Math.min(baseDur, 400);
++                for (int i = 0; i < n; i++) out.add(new FlipEntry(i, (long) (rnd.nextFloat() * 700), d2));
++                break;
++            }
++            default:
++                for (int i = 0; i < n; i++) out.add(new FlipEntry(i, i * itv, baseDur));
++        }
++        return out;
++    }
++
++    private long jitter(double amp) {
++        return (long) ((rnd.nextFloat() * 2 - 1) * amp);
++    }
++
++    private int[] spiralOrder(int cols, int rows) {
++        List<Integer> out = new ArrayList<>();
++        int x0 = 0, y0 = 0, x1 = cols - 1, y1 = rows - 1;
++        while (x0 <= x1 && y0 <= y1) {
++            for (int x = x0; x <= x1; x++) out.add(y0 * cols + x);
++            for (int y = y0 + 1; y <= y1; y++) out.add(y * cols + x1);
++            if (y1 > y0) for (int x = x1 - 1; x >= x0; x--) out.add(y1 * cols + x);
++            if (x1 > x0) for (int y = y1 - 1; y > y0; y--) out.add(y * cols + x0);
++            x0++;
++            y0++;
++            x1--;
++            y1--;
++        }
++        int[] arr = new int[out.size()];
++        for (int i = 0; i < arr.length; i++) arr[i] = out.get(i);
++        return arr;
++    }
++
++    private void transitionTo(String name) {
++        if (!dataReady) return;
++        cancelPending();
++        int[] targets = assignTargets(name);
++        List<FlipEntry> entries = schedule(mode, dur);
++        long total = 0;
++        for (FlipEntry e : entries) total = Math.max(total, e.t);
++        total += dur + 60;
++        transActive = true;
++        handler.removeCallbacks(snapRun);
++        handler.postDelayed(snapRun, 160);   // 翻转期间连续快照，模糊内容跟上翻转
++        for (FlipEntry e : entries) {
++            int idx = e.idx;
++            int target = targets[idx];
++            int d = e.dur;
++            if (idx >= cells.size()) continue;
++            Runnable run = () -> flip(cells.get(idx), target, d);
++            pending.add(run);
++            handler.postDelayed(() -> {
++                pending.remove(run);
++                if (running) run.run();
++            }, e.t);
++        }
++        mood = name;
++        // 最后一格落定的瞬间：模糊层同步到新排布（墙此刻静止，一次淡入）
++        final Runnable[] settleBox = new Runnable[1];
++        Runnable settle = () -> {
++            if (settleBox[0] != null) pending.remove(settleBox[0]);
++            if (!running) return;
++            transActive = false;
++            takeSnapshot();
++        };
++        settleBox[0] = settle;
++        pending.add(settle);
++        handler.postDelayed(settle, total + 60);
++        scheduleTour(total + hold * 1000L);
++    }
++
++    private void scheduleTour(long delay) {
++        if (tourRun != null) {
++            handler.removeCallbacks(tourRun);
++            pending.remove(tourRun);
++        }
++        tourRun = () -> {
++            tourRun = null;
++            if (running) tourNext();
++        };
++        pending.add(tourRun);
++        handler.postDelayed(tourRun, delay);
++    }
++
++    private Runnable tourRun;
++
++    private void tourNext() {
++        transActive = false;
++        List<String> names = new ArrayList<>(moods.keySet());
++        if (names.isEmpty()) return;
++        modeCursor = (modeCursor + 1) % modes.length;
++        List<String> others = new ArrayList<>();
++        for (String k : names) {
++            if (!k.equals(mood) && !moods.get(k).isEmpty()) others.add(k);
++        }
++        String next;
++        if (others.isEmpty()) {
++            next = names.get(rnd.nextInt(names.size()));
++        } else {
++            int total = 0;
++            for (String k : others) total += moods.get(k).size();
++            int x = rnd.nextInt(total);
++            next = others.get(others.size() - 1);
++            for (String k : others) {
++                x -= moods.get(k).size();
++                if (x <= 0) {
++                    next = k;
++                    break;
++                }
++            }
++        }
++        transitionTo(next);
++    }
++
++    private void cancelPending() {
++        for (Runnable r : new ArrayList<>(pending)) handler.removeCallbacks(r);
++        pending.clear();
++    }
++
++    /* ---------------- ambient single flips ---------------- */
++
++    private final Runnable ambientRun = new Runnable() {
++        @Override public void run() {
++            if (!running) return;
++            long now = System.currentTimeMillis();
++            if (!transActive && ambient && mood != null && now - ambientLast >= ambientEvery * 1000L) {
++                ambientLast = now;
++                List<Cell> free = new ArrayList<>();
++                for (Cell c : cells) if (!c.busy) free.add(c);
++                Collections.shuffle(free, rnd);
++                List<Integer> pool = poolOf(mood);
++                int k = Math.min(free.size(), 1 + rnd.nextInt(2));
++                boolean flipped = false;
++                for (int i = 0; i < k && !pool.isEmpty(); i++) {
++                    Cell cell = free.get(i);
++                    int t = pool.get(rnd.nextInt(pool.size()));
++                    if (t != cell.cur) {
++                        flip(cell, t, Math.max(420, (int) (dur * 0.8)));
++                        flipped = true;
++                    }
++                }
++                // 零星换片后同步模糊层（墙静止，一次淡入，不产生刷新感）
++                if (flipped) {
++                    lastSnap = now;
++                    handler.postDelayed(() -> {
++                        if (running && !transActive) takeSnapshot();
++                    }, Math.max(420, (int) (dur * 0.8)) + 60);
++                }
++            }
++            handler.postDelayed(this, 1000);
++        }
++    };
++
++    /* ---------------- lifecycle ---------------- */
++
++    @Override protected void onAttachedToWindow() {
++        super.onAttachedToWindow();
++        if (isInEditMode()) return;
++        handler.removeCallbacks(ambientRun);
++        handler.post(ambientRun);
++    }
++
++    @Override protected void onDetachedFromWindow() {
++        super.onDetachedFromWindow();
++        handler.removeCallbacks(ambientRun);
++    }
++
++    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
++        super.onSizeChanged(w, h, oldw, oldh);
++        if (!dataReady || w == 0 || h == 0) return;
++        cancelPending();
++        buildGrid();
++        fillInstant(mood == null ? biggestMood() : mood);
++        scheduleTour(hold * 1000L);
++    }
++}
+diff --git a/launcher/app/src/main/res/layout/activity_launcher_settings.xml b/launcher/app/src/main/res/layout/activity_launcher_settings.xml
+index 2a59821..7b45dd9 100644
+--- a/launcher/app/src/main/res/layout/activity_launcher_settings.xml
++++ b/launcher/app/src/main/res/layout/activity_launcher_settings.xml
+@@ -98,6 +98,44 @@
+             android:textColor="#FFACB8C1"
+             android:textSize="14sp" />
+ 
++        <!-- 海报墙参数（poster_wall 开启时由代码显示；点击行弹单选，值清主题推送会重置） -->
++        <LinearLayout
++            android:id="@+id/posterWallSection"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:orientation="vertical"
++            android:visibility="gone">
++
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="34dp"
++                android:text="海报墙"
++                android:textColor="#FFFFFFFF"
++                android:textSize="24sp" />
++
++            <TextView android:id="@+id/pwModeChoice" style="@style/SettingsRow" android:layout_marginTop="14dp" />
++            <TextView android:id="@+id/pwDurChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwIntervalChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwHoldChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwColsChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwTiltChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwGapChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwVignetteChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwBlurChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwFxRangeChoice" style="@style/SettingsRow" android:layout_marginTop="10dp" />
++            <TextView android:id="@+id/pwResetChoice" style="@style/SettingsRow" android:layout_marginTop="14dp"
++                android:text="恢复主题默认" />
++
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:layout_marginTop="7dp"
++                android:text="改动回到 Home 即生效；主题推送后恢复为主题里的值。"
++                android:textColor="#FFACB8C1"
++                android:textSize="14sp" />
++        </LinearLayout>
++
+         <TextView
+             android:id="@+id/defaultHomeChoice"
+             style="@style/SettingsRow"
+diff --git a/launcher/app/src/main/res/layout/activity_main.xml b/launcher/app/src/main/res/layout/activity_main.xml
+index b8fe09e..06e3eca 100644
+--- a/launcher/app/src/main/res/layout/activity_main.xml
++++ b/launcher/app/src/main/res/layout/activity_main.xml
+@@ -5,6 +5,14 @@
+     android:layout_height="match_parent"
+     android:background="#FF000000">
+ 
++    <!-- Poster flip wall (config.json poster_wall): the movie-poster backdrop, behind everything. -->
++    <com.gathin.tvhome.PosterWallView
++        android:id="@+id/posterWall"
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:visibility="gone"
++        android:importantForAccessibility="no" />
++
+     <!-- Time-of-day backdrop, drawn once a minute (config.xml sky_intensity; 0 keeps it hidden). -->
+     <com.gathin.tvhome.SkyView
+         android:id="@+id/sky"
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 4ca1b96..6b263c5 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -9,15 +9,41 @@
+ 
+     <!-- Apps pinned to the dock row at the bottom, in this order. Missing apps are skipped. -->
+     <string-array name="dock_apps">
+-        <item>com.netflix.ninja</item>
+-        <item>com.amazon.amazonvideo.livingroom</item>
+-        <item>com.google.android.youtube.tv</item>
+-        <item>in.startv.hotstar</item>
++        <item>com.xiaodianshi.tv.yst</item>
++        <item>com.yyw.box.androidclient</item>
++        <item>com.netease.cloudmusic.tv</item>
++        <item>com.dangbei.lerad.videoposter</item>
+     </string-array>
+     <!-- With fewer dock_apps than columns (or a dock app that is not installed), the free dock slots take
+          the first grid apps, so the dock never shows a gap. false leaves them empty (#162); a theme can
+          set "fill_dock": false. -->
+     <bool name="fill_dock">true</bool>
++    <!-- Dock tiles shrink to this percent (50-100; config.json dock_scale_percent) so a backdrop shows through. -->
++    <integer name="dock_scale_percent">100</integer>
++
++    <!-- Poster flip wall as the home backdrop (config.json, poster_wall): movie posters in a tilted grid
++         that flips between colour moods. Data lives in files/posterwall/ (manifest.json + posters/),
++         pushed by tools/theme.sh when the theme folder has a posterwall/ directory. -->
++    <bool name="poster_wall">false</bool>
++    <integer name="poster_wall_cols">9</integer>
++    <!-- Whole-board tilt in degrees (0-12). -->
++    <integer name="poster_wall_tilt">6</integer>
++    <!-- Flip choreography: ripple rippleRing column row diagonal checker spiral spiralIn random stagger converge splitflap. -->
++    <string name="poster_wall_mode" translatable="false">rippleRing</string>
++    <integer name="poster_wall_dur">650</integer>
++    <integer name="poster_wall_interval">110</integer>
++    <integer name="poster_wall_hold">9</integer>
++    <bool name="poster_wall_ambient">true</bool>
++    <integer name="poster_wall_ambient_every">8</integer>
++    <!-- Gap between wall tiles in dp (0-30; also settable on TV in Settings). -->
++    <integer name="poster_wall_gap">10</integer>
++    <!-- 画面效果：暗角强度（100=0.85 深度，116+ 外圈近全黑）、边缘模糊 px、效果范围 %
++         （0-150 / 0-24 / 20-90；也可在电视设置页调）。 -->
++    <integer name="poster_wall_vignette">42</integer>
++    <integer name="poster_wall_blur">5</integer>
++    <integer name="poster_wall_fx_range">58</integer>
++    <!-- With the wall on, the dock band goes translucent so the wall shows through (poster_wall_dim_dock). -->
++    <bool name="poster_wall_dim_dock">true</bool>
+ 
+     <!-- Apps never shown as tiles (e.g. the Live TV app, which the Inputs menu already covers). -->
+     <string-array name="hidden_apps">
+@@ -45,6 +71,8 @@
+     <!-- A tile's artwork instead of the app's banner: "package=drawable", a banner_* drawable bundled with the
+          launcher (res/drawable). banner_tv is a magenta field with the Live TV glyph. -->
+     <string-array name="app_banners">
++        <item>com.yyw.box.androidclient=banner_115</item>
++        <item>com.netease.cloudmusic.tv=banner_neteasemusic</item>
+     </string-array>
+ 
+     <!-- TVs with no TvInputManager have no HDMI list to read, but their own source-selection panel

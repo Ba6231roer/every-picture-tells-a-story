@@ -1,0 +1,29 @@
+MIT License
+
+Copyright (c) 2026 every-picture-tells-a-story contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+说明：`patches/cleanyourtv-launcher-poster-wall.patch` 派生自 cleanyourtv 项目
+（MIT License, Copyright (c) 2026 Gathin），同样以 MIT 协议分发。
+仓库内 `posters/` 与 `themes/*/posterwall/` 中的电影海报图片版权归各自的
+权利方所有，仅随本项目作个人欣赏与演示用途；如你是权利方并希望移除某张图，
+请提 issue，会立即处理。

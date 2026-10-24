@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 本地备份与临时产物
+backups/
+*.tmp
+*.log
+
+# 抓取过程的中间文件（results.json 可重新导出）
+data/douban_todo.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
