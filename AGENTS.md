@@ -4,6 +4,24 @@
 > 数据管线（清单 → 豆瓣抓海报 → 颜色分析）+ Chrome 插件 + cleanyourtv 启动器的
 > 海报墙渲染补丁。项目结构约定仿 cleanyourtv，但完全独立、只依赖 adb。
 
+## 首次会话固定流程（用户第一句话通常是"帮我准备环境并装到电视"）
+
+用户很可能**没有 Python、没有 adb、不懂 adb**。不要假设任何环境，按序执行：
+
+1. 通读 `README.md`、本文、[PROMPT.md](PROMPT.md)（即贴即用的首会话提示词，用户的
+   期待以它为准）与 `docs/`；
+2. **Python 缺失**：`winget install Python.Python.3.12`，或华为镜像
+   `mirrors.huaweicloud.com/python` 下载安装器；pip 一律加
+   `-i https://mirrors.aliyun.com/pypi/simple/`（中国网络直连 PyPI 很慢）；
+3. **adb 缺失**：`winget install Google.PlatformTools`，或 googledownloads.cn 的
+   platform-tools 包（Google 中国下载 CDN，境内可达）；装完 `setx ADB <路径>`；
+4. `python tools/env_check.py` → 逐项补齐 → `python tools/tv_check.py`；
+5. **任何改电视的操作之前**：`python tools/backup_tv.py`，并把 REPORT.md 里的恢复
+   命令念给用户听——大部分人最怕搞坏电视，这一步是信任基石；
+6. 之后按 PROMPT.md 的步骤走（launcher 三方案 → 影单 → 插件抓海报 → 推送 → 验证）。
+
+用户没提的偏好（dock 风格、色调、抓哪批）一律先问再做。
+
 ## 结构
 
 | 路径 | 内容 |

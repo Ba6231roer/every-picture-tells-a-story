@@ -30,7 +30,21 @@
 
 ## 快速开始
 
+### 路线 A：让 AI 助手帮你（推荐，零基础也能走通）
+
+1. 克隆/下载本仓库到与电视同一 Wi-Fi 的电脑；
+2. 电视端照 [PROMPT.md](PROMPT.md) 开头的一次性步骤开启开发者选项和 ADB 调试；
+3. 打开你的编程助手（Claude Code / Codex / ZCode / Gemini CLI…），把
+   [PROMPT.md](PROMPT.md) 里的提示词整段粘贴发送。
+
+助手会按 [AGENTS.md](AGENTS.md) 的固定流程执行：缺 Python/adb 就帮你装、
+检测电视适配度、**先备份再动手**、引导你选影单来源、装插件抓海报、
+推送电视并逐步截图验证。
+
+### 路线 B：手动执行
+
 > 详细步骤和每一步的注意事项见 [docs/](docs/)，这里是最短路径。
+> 所有命令在仓库根目录执行；Windows 控制台建议先 `chcp 65001`。
 
 ```bash
 # 0) 环境检测（会告诉你缺什么、怎么装）
@@ -55,9 +69,10 @@ python tools/build_manifest.py
 python tools/push_theme.py --theme themes/example-kd55x9100h
 ```
 
-HTML 预览（不需要电视，调参数用）：
+### HTML 预览（不需要电视，调参数用）
 
 ```bash
+# 在仓库根目录执行（preview 页面从根目录取数据）
 python -m http.server 8765
 # 浏览器打开 http://127.0.0.1:8765/preview/
 ```

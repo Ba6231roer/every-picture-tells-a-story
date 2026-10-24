@@ -3,6 +3,10 @@
 
 用法：python tools/env_check.py
 """
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import importlib
 import shutil
 import sys

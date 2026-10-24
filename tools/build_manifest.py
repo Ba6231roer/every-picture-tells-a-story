@@ -15,6 +15,10 @@ from collections import Counter
 from PIL import Image
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from pw_names import safe_file  # noqa: E402
 
 OUT = pathlib.Path(__file__).resolve().parent.parent

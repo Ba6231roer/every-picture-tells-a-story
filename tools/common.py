@@ -14,6 +14,13 @@ import sys
 import time
 import pathlib
 
+# Windows 控制台中文输出兜底（GBK 环境下不重配置会 UnicodeEncodeError）
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001
+    pass
+
 PROJECT = pathlib.Path(__file__).resolve().parent.parent
 POSTERS = PROJECT / "posters"
 DATA = PROJECT / "data"
@@ -23,7 +30,8 @@ PKG = "com.gathin.tvhome"          # cleanyourtv 启动器的包名
 TV_FILES = f"/sdcard/Android/data/{PKG}/files"
 STAGE = "/data/local/tmp/epx"
 
-_COMMON_HINT = "未找到 adb。安装 Android platform-tools，或 set ADB=<adb.exe 路径>"
+_COMMON_HINT = ("未找到 adb。安装方式任选：winget install Google.PlatformTools；"
+                "googledownloads.cn 下载 platform-tools；或 set ADB=<adb.exe 路径>")
 
 
 def find_adb():

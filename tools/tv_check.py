@@ -10,6 +10,10 @@ import sys
 import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from common import Tv, find_adb, run  # noqa: E402
 
 MIN_SDK = 26          # cleanyourtv launcher 的 minSdk
