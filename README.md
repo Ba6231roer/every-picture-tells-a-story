@@ -6,7 +6,7 @@
 （波纹递进 / 列扫 / 棋盘交替 / 螺旋 / 风暴齐翻……12 种）翻成另一种色调；中心聚焦、
 四周暗角与模糊，像电影片头一样。
 
-![电视效果](shots/tv-effect.png)
+![电视效果](shots/tv-effect.gif)
 
 > 项目名来自 Rod Stewart 1971 年的同名专辑——Every Picture Tells a Story，
 > 每一张海报，都在讲你自己的故事。
